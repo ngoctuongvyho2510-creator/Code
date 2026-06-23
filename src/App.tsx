@@ -1,121 +1,102 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
 import './App.css'
 
+const services = [
+  'Wrap',
+  'Chrome Delete',
+  'Window Tint',
+  'PPF',
+  'Ceramic Coating',
+  'Caliper Paint',
+  'Powder Coating',
+  'Custom Artwork',
+  'Add-ons',
+]
+
+const configurationSections = [
+  'Selected Service',
+  'Vehicle Part',
+  'Material',
+  'Finish',
+]
+
+const viewerControls = [
+  'Reset View',
+  'Front Left',
+  'Front Right',
+  'Left',
+  'Right',
+  'Top',
+  'Fullscreen',
+]
+
 function App() {
-  const [count, setCount] = useState(0)
-
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
+    <main className="studio-shell" aria-label="ModifyWrap 3D S4 Demo">
+      <header className="studio-header">
+        <div className="brand-lockup">
+          <img className="brand-logo" src="/Logo.png" alt="ModifyWrap logo" />
+          <div>
+            <h1 className="studio-title">MODIFYWRAP 3D STUDIO</h1>
+            <p className="vehicle-name">2013 Audi S4</p>
+          </div>
         </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
 
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
+        <div className="header-actions" aria-label="Design actions">
+          <button type="button" className="primary-action">
+            Save My Design
+          </button>
+          <button type="button" className="secondary-action">
+            Request a Quote
+          </button>
         </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+      </header>
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+      <div className="studio-workspace">
+        <aside className="services-panel" aria-labelledby="services-heading">
+          <h2 id="services-heading">Services</h2>
+          <nav aria-label="Customization services">
+            <ul className="services-list">
+              {services.map((service) => (
+                <li key={service}>
+                  <button type="button" className="service-button">
+                    {service}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        </aside>
+
+        <section className="viewer-panel" aria-labelledby="viewer-heading">
+          <h2 id="viewer-heading" className="visually-hidden">
+            Vehicle viewer
+          </h2>
+          <div className="vehicle-placeholder" role="img" aria-label="3D vehicle view placeholder">
+            <span>3D VEHICLE VIEW</span>
+          </div>
+        </section>
+
+        <aside className="configuration-panel" aria-labelledby="configuration-heading">
+          <h2 id="configuration-heading">Configuration</h2>
+          <div className="configuration-sections">
+            {configurationSections.map((section) => (
+              <section className="configuration-section" key={section}>
+                <h3>{section}</h3>
+                <p>Not selected</p>
+              </section>
+            ))}
+          </div>
+        </aside>
+      </div>
+
+      <footer className="viewer-toolbar" aria-label="Viewer toolbar">
+        {viewerControls.map((control) => (
+          <button type="button" className="toolbar-button" key={control}>
+            {control}
+          </button>
+        ))}
+      </footer>
+    </main>
   )
 }
 
