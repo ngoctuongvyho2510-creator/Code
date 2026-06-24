@@ -140,36 +140,16 @@
 }
 
 .viewer-panel {
+  position: relative;
   min-height: 620px;
-  display: grid;
-  place-items: center;
-  padding: 32px;
+  display: block;
+  padding: 0;
+  overflow: hidden;
   background:
     linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
     var(--viewer-bg);
   background-size: 42px 42px;
-}
-
-.vehicle-placeholder {
-  width: min(760px, 100%);
-  min-height: 390px;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(196, 157, 89, 0.45);
-  border-radius: 8px;
-  color: var(--gold);
-  background: rgba(4, 4, 5, 0.42);
-  box-shadow: inset 0 0 80px rgba(196, 157, 89, 0.07);
-}
-
-.vehicle-placeholder span {
-  padding: 14px 22px;
-  border: 1px solid rgba(196, 157, 89, 0.32);
-  border-radius: 999px;
-  font-size: 0.86rem;
-  font-weight: 800;
-  letter-spacing: 0.18em;
 }
 
 .configuration-sections {
@@ -289,7 +269,6 @@ button:focus-visible {
   .studio-header,
   .services-panel,
   .configuration-panel,
-  .viewer-panel,
   .viewer-toolbar {
     padding: 18px;
   }
@@ -316,9 +295,5 @@ button:focus-visible {
 
   .services-list {
     grid-template-columns: 1fr;
-  }
-
-  .vehicle-placeholder {
-    min-height: 300px;
   }
 }

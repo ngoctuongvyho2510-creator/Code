@@ -1,3 +1,8 @@
+import { useRef } from 'react'
+import {
+  VehicleViewer,
+  type VehicleViewerHandle,
+} from './components/viewer/VehicleViewer'
 import './App.css'
 
 const services = [
@@ -30,6 +35,8 @@ const viewerControls = [
 ]
 
 function App() {
+  const vehicleViewerRef = useRef<VehicleViewerHandle>(null)
+
   return (
     <main className="studio-shell" aria-label="ModifyWrap 3D S4 Demo">
       <header className="studio-header">
@@ -71,9 +78,7 @@ function App() {
           <h2 id="viewer-heading" className="visually-hidden">
             Vehicle viewer
           </h2>
-          <div className="vehicle-placeholder" role="img" aria-label="3D vehicle view placeholder">
-            <span>3D VEHICLE VIEW</span>
-          </div>
+          <VehicleViewer ref={vehicleViewerRef} />
         </section>
 
         <aside className="configuration-panel" aria-labelledby="configuration-heading">
@@ -91,7 +96,16 @@ function App() {
 
       <footer className="viewer-toolbar" aria-label="Viewer toolbar">
         {viewerControls.map((control) => (
-          <button type="button" className="toolbar-button" key={control}>
+          <button
+            type="button"
+            className="toolbar-button"
+            key={control}
+            onClick={
+              control === 'Reset View'
+                ? () => vehicleViewerRef.current?.resetView()
+                : undefined
+            }
+          >
             {control}
           </button>
         ))}
