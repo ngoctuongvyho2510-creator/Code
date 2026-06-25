@@ -6,6 +6,7 @@ import {
   BufferGeometry,
   Color,
   EdgesGeometry,
+  FrontSide,
   LineBasicMaterial,
   LineSegments,
   Material,
@@ -103,6 +104,16 @@ const tintableMeshNames = new Set<string>(TINTABLE_GLASS_MESH_NAMES)
 const fullBodyMeshNames = new Set<string>(FULL_BODY_MESH_NAMES)
 const wrapCapableMeshNames = new Set<string>(WRAP_CAPABLE_MESH_NAMES)
 const plateMaterialNamePattern = /^LicPlate_/i
+const factoryPaintMaterialName = 'carpaint'
+
+const cleanFactoryPaintSettings = {
+  clearcoat: 0.84,
+  clearcoatRoughness: 0.08,
+  envMapIntensity: 1.18,
+  metalness: 0.02,
+  reflectivity: 0.56,
+  roughness: 0.24,
+} as const
 
 const wrapFinishSettings = {
   gloss: {
@@ -167,11 +178,87 @@ function cloneMaterials(material: Material | Material[]): Material | Material[] 
   return material.clone()
 }
 
+function clearStandardMaterialTextureInputs(material: MeshStandardMaterial) {
+  material.map = null
+  material.lightMap = null
+  material.aoMap = null
+  material.emissiveMap = null
+  material.bumpMap = null
+  material.normalMap = null
+  material.displacementMap = null
+  material.roughnessMap = null
+  material.metalnessMap = null
+  material.alphaMap = null
+
+  if (material instanceof MeshPhysicalMaterial) {
+    material.clearcoatMap = null
+    material.clearcoatRoughnessMap = null
+    material.clearcoatNormalMap = null
+    material.iridescenceMap = null
+    material.iridescenceThicknessMap = null
+    material.sheenColorMap = null
+    material.sheenRoughnessMap = null
+    material.specularColorMap = null
+    material.specularIntensityMap = null
+    material.thicknessMap = null
+    material.transmissionMap = null
+    material.anisotropyMap = null
+  }
+}
+
+function applySmoothOpaqueSurfaceDefaults(material: MeshStandardMaterial) {
+  material.alphaHash = false
+  material.alphaTest = 0
+  material.depthTest = true
+  material.depthWrite = true
+  material.flatShading = false
+  material.opacity = 1
+  material.side = FrontSide
+  material.toneMapped = true
+  material.transparent = false
+  material.vertexColors = false
+}
+
+function createCleanFactoryPaintMaterial(
+  material: MeshStandardMaterial,
+): MeshPhysicalMaterial {
+  const runtimeMaterial = new MeshPhysicalMaterial()
+
+  runtimeMaterial.name = material.name
+  runtimeMaterial.color.copy(material.color)
+  runtimeMaterial.emissive.copy(material.emissive)
+  runtimeMaterial.emissiveIntensity = 0
+  runtimeMaterial.envMap = material.envMap
+  runtimeMaterial.envMapIntensity = cleanFactoryPaintSettings.envMapIntensity
+  runtimeMaterial.metalness = cleanFactoryPaintSettings.metalness
+  runtimeMaterial.roughness = cleanFactoryPaintSettings.roughness
+  runtimeMaterial.clearcoat = cleanFactoryPaintSettings.clearcoat
+  runtimeMaterial.clearcoatRoughness =
+    cleanFactoryPaintSettings.clearcoatRoughness
+  runtimeMaterial.reflectivity = cleanFactoryPaintSettings.reflectivity
+
+  clearStandardMaterialTextureInputs(runtimeMaterial)
+  applySmoothOpaqueSurfaceDefaults(runtimeMaterial)
+
+  return runtimeMaterial
+}
+
+function isFactoryPaintMaterial(material: Material): material is MeshStandardMaterial {
+  return (
+    material instanceof MeshStandardMaterial &&
+    material.name === factoryPaintMaterialName
+  )
+}
+
 function createRuntimeMaterial(
   material: Material,
   wrapCapable: boolean,
   tintCapable: boolean,
 ): Material {
+  if (wrapCapable && isFactoryPaintMaterial(material)) {
+    return createCleanFactoryPaintMaterial(material)
+  }
+
   if ((wrapCapable || tintCapable) && material instanceof MeshStandardMaterial) {
     const runtimeMaterial = new MeshPhysicalMaterial()
 
@@ -611,8 +698,12 @@ function applyWrapToMaterial(material: Material, wrap: WrapConfig) {
 
   const settings = wrapFinishSettings[wrap.finish]
 
+  clearStandardMaterialTextureInputs(material)
+  applySmoothOpaqueSurfaceDefaults(material)
+
   material.color.setStyle(wrap.color, SRGBColorSpace)
-  material.map = null
+  material.emissive.set(0, 0, 0)
+  material.emissiveIntensity = 0
   material.metalness = 0.02
   material.roughness = settings.roughness
   material.envMapIntensity = settings.envMapIntensity
