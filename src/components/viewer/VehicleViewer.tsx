@@ -14,6 +14,7 @@ import { S4Model } from './S4Model'
 import { ViewerErrorBoundary } from './ViewerErrorBoundary'
 import type {
   AppliedDesignState,
+  TintPreviewState,
   WrapPreviewState,
 } from '../../types/configurator'
 import './VehicleViewer.css'
@@ -29,6 +30,7 @@ export type VehicleViewerHandle = {
 type VehicleViewerProps = {
   appliedDesign: AppliedDesignState
   selectedTargetId: string | null
+  tintPreview: TintPreviewState | null
   wrapPreview: WrapPreviewState | null
   onPartSelect: (partId: string) => void
   onScenePointerMissed: () => void
@@ -129,6 +131,7 @@ type ViewerSceneProps = {
   onPartSelect: (partId: string) => void
   onScenePointerMissed: () => void
   selectedTargetId: string | null
+  tintPreview: TintPreviewState | null
   wrapPreview: WrapPreviewState | null
 }
 
@@ -138,6 +141,7 @@ function ViewerScene({
   onResetReady,
   onScenePointerMissed,
   selectedTargetId,
+  tintPreview,
   wrapPreview,
 }: ViewerSceneProps) {
   const controlsRef = useRef<OrbitControlsImpl | null>(null)
@@ -175,6 +179,7 @@ function ViewerScene({
             appliedDesign={appliedDesign}
             controlsRef={controlsRef}
             selectedTargetId={selectedTargetId}
+            tintPreview={tintPreview}
             wrapPreview={wrapPreview}
             onPartSelect={onPartSelect}
             onSelectionClear={onScenePointerMissed}
@@ -192,6 +197,7 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
       onPartSelect,
       onScenePointerMissed,
       selectedTargetId,
+      tintPreview,
       wrapPreview,
     },
     ref,
@@ -235,6 +241,7 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
           <ViewerScene
             appliedDesign={appliedDesign}
             selectedTargetId={selectedTargetId}
+            tintPreview={tintPreview}
             wrapPreview={wrapPreview}
             onPartSelect={onPartSelect}
             onScenePointerMissed={onScenePointerMissed}

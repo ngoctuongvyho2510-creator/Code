@@ -2,6 +2,8 @@ import type {
   PartGroup,
   ServiceId,
   SurfaceType,
+  TintScope,
+  TintScopeOption,
   VehiclePartDefinition,
 } from '../types/configurator'
 
@@ -38,10 +40,74 @@ const WHEEL_SERVICES = ['powder-coat', 'ceramic'] as const satisfies readonly Se
 const CENTER_CAP_SERVICES = ['wrap'] as const satisfies readonly ServiceId[]
 const CALIPER_SERVICES = ['caliper-paint'] as const satisfies readonly ServiceId[]
 const BRAKE_DISC_SERVICES = ['performance'] as const satisfies readonly ServiceId[]
-const LAMP_SERVICES = ['ppf', 'tint', 'ceramic'] as const satisfies readonly ServiceId[]
-const SIGNAL_SERVICES = ['ppf', 'tint'] as const satisfies readonly ServiceId[]
+const LAMP_SERVICES = ['ppf', 'ceramic'] as const satisfies readonly ServiceId[]
+const SIGNAL_SERVICES = ['ppf'] as const satisfies readonly ServiceId[]
 const EXHAUST_SERVICES = ['powder-coat', 'ceramic'] as const satisfies readonly ServiceId[]
 const WIPER_SERVICES = ['wrap'] as const satisfies readonly ServiceId[]
+
+export const TINTABLE_GLASS_PART_IDS = [
+  'windshield',
+  'front-window-left',
+  'front-window-right',
+  'rear-window-left',
+  'rear-window-right',
+  'quarter-glass-left',
+  'quarter-glass-right',
+  'rear-glass',
+] as const
+
+const FRONT_SIDE_TINT_PART_IDS = [
+  'front-window-left',
+  'front-window-right',
+] as const
+
+const REAR_SIDE_TINT_PART_IDS = [
+  'rear-window-left',
+  'rear-window-right',
+] as const
+
+const QUARTER_TINT_PART_IDS = [
+  'quarter-glass-left',
+  'quarter-glass-right',
+] as const
+
+const REAR_TINT_PART_IDS = [
+  ...REAR_SIDE_TINT_PART_IDS,
+  ...QUARTER_TINT_PART_IDS,
+  'rear-glass',
+] as const
+
+const tintScopeLabels = {
+  this: 'This',
+  pair: 'Pair',
+  rear: 'Rear',
+  all: 'All',
+} as const satisfies Record<TintScope, string>
+
+const tintScopesByPartId = {
+  windshield: ['this', 'all'],
+  'front-window-left': ['this', 'pair', 'all'],
+  'front-window-right': ['this', 'pair', 'all'],
+  'rear-window-left': ['this', 'pair', 'rear', 'all'],
+  'rear-window-right': ['this', 'pair', 'rear', 'all'],
+  'quarter-glass-left': ['this', 'pair', 'rear', 'all'],
+  'quarter-glass-right': ['this', 'pair', 'rear', 'all'],
+  'rear-glass': ['this', 'rear', 'all'],
+} as const satisfies Record<
+  (typeof TINTABLE_GLASS_PART_IDS)[number],
+  readonly TintScope[]
+>
+
+const tintPairPartIdsByPartId = {
+  'front-window-left': FRONT_SIDE_TINT_PART_IDS,
+  'front-window-right': FRONT_SIDE_TINT_PART_IDS,
+  'rear-window-left': REAR_SIDE_TINT_PART_IDS,
+  'rear-window-right': REAR_SIDE_TINT_PART_IDS,
+  'quarter-glass-left': QUARTER_TINT_PART_IDS,
+  'quarter-glass-right': QUARTER_TINT_PART_IDS,
+} as const satisfies Partial<
+  Record<(typeof TINTABLE_GLASS_PART_IDS)[number], readonly string[]>
+>
 
 export const FULL_BODY_MESH_NAMES = [
   'MW_SHELL_BODY_SIDE_OUTER_L',
@@ -237,6 +303,69 @@ export const FULL_BODY_PART_IDS = VEHICLE_PARTS.filter(
 export const WRAP_CAPABLE_MESH_NAMES = VEHICLE_PARTS.filter(
   (part) => part.selectable && !part.visualOnly && part.services.includes('wrap'),
 ).flatMap((part) => part.meshNames)
+
+export const TINTABLE_GLASS_MESH_NAMES = TINTABLE_GLASS_PART_IDS.flatMap(
+  (partId) => partById.get(partId)?.meshNames ?? [],
+)
+
+export function isTintableGlassTarget(targetId: string): boolean {
+  return TINTABLE_GLASS_PART_IDS.includes(
+    targetId as (typeof TINTABLE_GLASS_PART_IDS)[number],
+  )
+}
+
+export function getDefaultTintScope(targetId: string): TintScope | null {
+  return getTintScopeOptions(targetId)[0]?.id ?? null
+}
+
+export function getTintScopeOptions(targetId: string): readonly TintScopeOption[] {
+  if (!isTintableGlassTarget(targetId)) {
+    return []
+  }
+
+  const partId = targetId as (typeof TINTABLE_GLASS_PART_IDS)[number]
+
+  return tintScopesByPartId[partId].map((scope) => ({
+    id: scope,
+    label: tintScopeLabels[scope],
+  }))
+}
+
+export function resolveTintScopeTargetIds(
+  targetId: string,
+  scope: TintScope,
+): readonly string[] {
+  if (!isTintableGlassTarget(targetId)) {
+    return []
+  }
+
+  const validScopes = tintScopesByPartId[
+    targetId as (typeof TINTABLE_GLASS_PART_IDS)[number]
+  ]
+
+  if (!(validScopes as readonly TintScope[]).includes(scope)) {
+    return []
+  }
+
+  if (scope === 'this') {
+    return [targetId]
+  }
+
+  if (scope === 'all') {
+    return TINTABLE_GLASS_PART_IDS
+  }
+
+  if (scope === 'rear') {
+    return REAR_TINT_PART_IDS
+  }
+
+  const pairIds =
+    tintPairPartIdsByPartId[
+      targetId as keyof typeof tintPairPartIdsByPartId
+    ]
+
+  return pairIds ?? []
+}
 
 export function isVisualOnlyMeshName(meshName: string): boolean {
   return meshName.startsWith('tmp_') || meshName === 'tube01'
