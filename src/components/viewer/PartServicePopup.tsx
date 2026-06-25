@@ -2,6 +2,9 @@ import { useState } from 'react'
 import { getService } from '../../config/services'
 import type {
   ServiceId,
+  TintConfig,
+  TintScope,
+  TintScopeOption,
   VehiclePartDefinition,
   WrapConfig,
   WrapFinish,
@@ -15,13 +18,19 @@ const wrapFinishOptions = [
 
 const validHexColorPattern = /^#[0-9A-F]{6}$/
 const partialHexColorPattern = /^#[0-9A-F]{0,6}$/
+const tintShadeOptions = [70, 50, 35, 20, 5] as const
+const tintShadeOptionSet = new Set<number>(tintShadeOptions)
 
 type PartServicePopupProps = {
   target: VehiclePartDefinition
   selectedServiceId: ServiceId | null
   wrapConfig: WrapConfig | null
+  tintConfig: TintConfig | null
+  tintScope: TintScope | null
+  tintScopeOptions: readonly TintScopeOption[]
   canApplyAllWraps: boolean
   canResetAllWraps: boolean
+  canResetTint: boolean
   canResetWrap: boolean
   onApply: () => void
   onApplyAll: () => void
@@ -29,17 +38,24 @@ type PartServicePopupProps = {
   onCancel: () => void
   onClose: () => void
   onResetAllWraps: () => void
+  onResetTint: () => void
   onResetWrap: () => void
   onSelectService: (serviceId: ServiceId) => void
+  onUpdateTintDraft: (patch: Partial<TintConfig>) => void
+  onUpdateTintScope: (scope: TintScope) => void
   onUpdateWrapDraft: (patch: Partial<WrapConfig>) => void
 }
 
 export function PartServicePopup({
   canApplyAllWraps,
   canResetAllWraps,
+  canResetTint,
   canResetWrap,
   target,
   selectedServiceId,
+  tintConfig,
+  tintScope,
+  tintScopeOptions,
   wrapConfig,
   onApply,
   onApplyAll,
@@ -47,11 +63,17 @@ export function PartServicePopup({
   onCancel,
   onClose,
   onResetAllWraps,
+  onResetTint,
   onResetWrap,
   onSelectService,
+  onUpdateTintDraft,
+  onUpdateTintScope,
   onUpdateWrapDraft,
 }: PartServicePopupProps) {
-  const showWrapEditor = selectedServiceId === 'wrap' && wrapConfig
+  const showWrapEditor = selectedServiceId === 'wrap' && wrapConfig !== null
+  const showTintEditor =
+    selectedServiceId === 'tint' && tintConfig !== null && tintScope !== null
+  const showServiceList = !showWrapEditor && !showTintEditor
   const syncedHexValue = wrapConfig?.color.toUpperCase() ?? '#C49D59'
   const [hexInput, setHexInput] = useState<{
     source: string
@@ -59,6 +81,15 @@ export function PartServicePopup({
   } | null>(null)
   const hexValue =
     hexInput?.source === syncedHexValue ? hexInput.value : syncedHexValue
+  const [customTint, setCustomTint] = useState<{
+    active: boolean
+    source: number
+  } | null>(null)
+  const customTintActive = tintConfig
+    ? customTint?.source === tintConfig.vlt
+      ? customTint.active
+      : !tintShadeOptionSet.has(tintConfig.vlt)
+    : false
 
   function handleColorChange(color: string) {
     const normalizedColor = color.toUpperCase()
@@ -88,6 +119,32 @@ export function PartServicePopup({
     setHexInput(null)
   }
 
+  function handleTintShadeSelect(vlt: number) {
+    setCustomTint({ active: false, source: vlt })
+    onUpdateTintDraft({ vlt })
+  }
+
+  function handleCustomTintSelect() {
+    const nextVlt = tintConfig?.vlt ?? 35
+
+    setCustomTint({ active: true, source: nextVlt })
+  }
+
+  function handleCustomTintChange(value: string) {
+    if (value === '') {
+      return
+    }
+
+    const nextVlt = Math.min(100, Math.max(5, Math.round(Number(value))))
+
+    if (!Number.isFinite(nextVlt)) {
+      return
+    }
+
+    setCustomTint({ active: true, source: nextVlt })
+    onUpdateTintDraft({ vlt: nextVlt })
+  }
+
   return (
     <section
       className="part-popup"
@@ -102,7 +159,7 @@ export function PartServicePopup({
         </button>
       </div>
 
-      {showWrapEditor ? (
+      {showWrapEditor && wrapConfig ? (
         <div className="part-popup-wrap" aria-label="Wrap options">
           <label className="part-popup-field">
             <span>Color</span>
@@ -146,7 +203,77 @@ export function PartServicePopup({
             </div>
           </div>
         </div>
-      ) : (
+      ) : null}
+
+      {showTintEditor && tintConfig && tintScope ? (
+        <div className="part-popup-wrap" aria-label="Tint options">
+          <div>
+            <p className="part-popup-finish-label">Shade</p>
+            <div className="part-popup-finish-grid" aria-label="Shade">
+              {tintShadeOptions.map((vlt) => (
+                <button
+                  type="button"
+                  className="part-popup-finish"
+                  data-selected={!customTintActive && tintConfig.vlt === vlt}
+                  key={vlt}
+                  onClick={() => handleTintShadeSelect(vlt)}
+                >
+                  {vlt}%
+                </button>
+              ))}
+              <button
+                type="button"
+                className="part-popup-finish"
+                data-selected={customTintActive}
+                onClick={handleCustomTintSelect}
+              >
+                Custom
+              </button>
+            </div>
+          </div>
+
+          {customTintActive ? (
+            <label className="part-popup-field">
+              <span>VLT</span>
+              <div className="part-popup-tint-custom-row">
+                <input
+                  type="number"
+                  className="part-popup-vlt-input"
+                  aria-label="Custom VLT"
+                  min={5}
+                  max={100}
+                  value={tintConfig.vlt}
+                  onChange={(event) =>
+                    handleCustomTintChange(event.currentTarget.value)
+                  }
+                />
+                <span className="part-popup-color-value">
+                  {tintConfig.vlt}% VLT
+                </span>
+              </div>
+            </label>
+          ) : null}
+
+          <div>
+            <p className="part-popup-finish-label">Apply To</p>
+            <div className="part-popup-finish-grid" aria-label="Apply To">
+              {tintScopeOptions.map((scope) => (
+                <button
+                  type="button"
+                  className="part-popup-finish"
+                  data-selected={tintScope === scope.id}
+                  key={scope.id}
+                  onClick={() => onUpdateTintScope(scope.id)}
+                >
+                  {scope.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showServiceList ? (
         <div className="part-popup-services" aria-label="Services">
           {target.services.map((serviceId) => {
             const service = getService(serviceId)
@@ -164,7 +291,7 @@ export function PartServicePopup({
             )
           })}
         </div>
-      )}
+      ) : null}
 
       {showWrapEditor ? (
         <div className="part-popup-actions part-popup-actions--wrap">
@@ -199,6 +326,27 @@ export function PartServicePopup({
               onClick={onApplyAll}
             >
               Apply All
+            </button>
+          ) : null}
+          <button type="button" className="part-popup-apply" onClick={onApply}>
+            Apply
+          </button>
+        </div>
+      ) : showTintEditor ? (
+        <div className="part-popup-actions part-popup-actions--wrap">
+          <button type="button" className="part-popup-link" onClick={onBack}>
+            Back
+          </button>
+          <button type="button" className="part-popup-link" onClick={onCancel}>
+            Cancel
+          </button>
+          {canResetTint ? (
+            <button
+              type="button"
+              className="part-popup-link"
+              onClick={onResetTint}
+            >
+              Reset
             </button>
           ) : null}
           <button type="button" className="part-popup-apply" onClick={onApply}>

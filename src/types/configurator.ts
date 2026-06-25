@@ -67,12 +67,24 @@ export type WrapConfig = {
   finish: WrapFinish
 }
 
+export type TintScope = 'this' | 'pair' | 'rear' | 'all'
+
+export type TintScopeOption = {
+  id: TintScope
+  label: string
+}
+
+export type TintConfig = {
+  vlt: number
+}
+
 export type AppliedServiceState = {
   serviceId: ServiceId
 }
 
 export type LayeredSurfaceState = {
   wrap: WrapConfig | null
+  tint: TintConfig | null
   artwork: AppliedServiceState | null
   ppf: AppliedServiceState | null
   ceramic: AppliedServiceState | null
@@ -88,9 +100,16 @@ export type DraftSelectionState = {
   targetId: SelectionTargetId
   serviceId: ServiceId | null
   wrapConfig: WrapConfig | null
+  tintConfig: TintConfig | null
+  tintScope: TintScope | null
 }
 
 export type WrapPreviewState = {
   targetId: SelectionTargetId
   wrap: WrapConfig
+}
+
+export type TintPreviewState = {
+  targetIds: readonly SelectionTargetId[]
+  tint: TintConfig
 }

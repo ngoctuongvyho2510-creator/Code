@@ -30,10 +30,13 @@ import {
   getSelectablePartByMeshName,
   getSelectionTarget,
   LICENSE_PLATE_MESH_NAMES,
+  TINTABLE_GLASS_MESH_NAMES,
   WRAP_CAPABLE_MESH_NAMES,
 } from '../../config/vehicleParts'
 import type {
   AppliedDesignState,
+  TintConfig,
+  TintPreviewState,
   WrapConfig,
   WrapFinish,
   WrapPreviewState,
@@ -54,6 +57,7 @@ type ModelMesh = Mesh<BufferGeometry, Material | Material[], Object3DEventMap>
 
 type PreparedModelScene = {
   fallbackPlateSurfaceNames: string[]
+  foundTintableMeshNames: Set<string>
   foundWrapCapableMeshNames: Set<string>
   nativePlateMeshNames: Set<string>
   originalFactoryMaterialsByMeshUuid: Map<string, Material | Material[]>
@@ -85,14 +89,17 @@ type S4ModelProps = {
   appliedDesign: AppliedDesignState
   controlsRef: RefObject<OrbitControlsImpl | null>
   selectedTargetId: string | null
+  tintPreview: TintPreviewState | null
   wrapPreview: WrapPreviewState | null
   onPartSelect: (partId: string) => void
   onSelectionClear: () => void
 }
 
 const inspectedScenes = new WeakSet<Object3D>()
+const inspectedTintableMeshScenes = new WeakSet<Object3D>()
 const inspectedWrapMeshScenes = new WeakSet<Object3D>()
 const plateMeshNames = new Set<string>(LICENSE_PLATE_MESH_NAMES)
+const tintableMeshNames = new Set<string>(TINTABLE_GLASS_MESH_NAMES)
 const fullBodyMeshNames = new Set<string>(FULL_BODY_MESH_NAMES)
 const wrapCapableMeshNames = new Set<string>(WRAP_CAPABLE_MESH_NAMES)
 const plateMaterialNamePattern = /^LicPlate_/i
@@ -163,8 +170,9 @@ function cloneMaterials(material: Material | Material[]): Material | Material[] 
 function createRuntimeMaterial(
   material: Material,
   wrapCapable: boolean,
+  tintCapable: boolean,
 ): Material {
-  if (wrapCapable && material instanceof MeshStandardMaterial) {
+  if ((wrapCapable || tintCapable) && material instanceof MeshStandardMaterial) {
     const runtimeMaterial = new MeshPhysicalMaterial()
 
     if (material instanceof MeshPhysicalMaterial) {
@@ -190,12 +198,15 @@ function createRuntimeMaterial(
 function createRuntimeMaterials(
   material: Material | Material[],
   wrapCapable: boolean,
+  tintCapable: boolean,
 ): Material | Material[] {
   if (Array.isArray(material)) {
-    return material.map((item) => createRuntimeMaterial(item, wrapCapable))
+    return material.map((item) =>
+      createRuntimeMaterial(item, wrapCapable, tintCapable),
+    )
   }
 
-  return createRuntimeMaterial(material, wrapCapable)
+  return createRuntimeMaterial(material, wrapCapable, tintCapable)
 }
 
 function getMaterialNames(material: Material | Material[]): string {
@@ -339,6 +350,7 @@ function prepareModelScene(
   surfacePlateTexture: Texture,
 ): PreparedModelScene {
   const fallbackPlateSurfaceNames: string[] = []
+  const foundTintableMeshNames = new Set<string>()
   const foundWrapCapableMeshNames = new Set<string>()
   const nativePlateMeshNames = new Set<string>()
   const originalFactoryMaterialsByMeshUuid = new Map<
@@ -361,16 +373,25 @@ function prepareModelScene(
     )
 
     const wrapCapable = wrapCapableMeshNames.has(object.name)
+    const tintCapable = tintableMeshNames.has(object.name)
 
     if (wrapCapable) {
       foundWrapCapableMeshNames.add(object.name)
+    }
+
+    if (tintCapable) {
+      foundTintableMeshNames.add(object.name)
     }
 
     if (plateMeshNames.has(object.name)) {
       nativePlateMeshNames.add(object.name)
       object.material = createPlateMaterial(nativePlateTexture)
     } else {
-      object.material = createRuntimeMaterials(object.material, wrapCapable)
+      object.material = createRuntimeMaterials(
+        object.material,
+        wrapCapable,
+        tintCapable,
+      )
     }
 
     runtimeFactoryMaterialsByMeshUuid.set(
@@ -389,6 +410,7 @@ function prepareModelScene(
 
   return {
     fallbackPlateSurfaceNames,
+    foundTintableMeshNames,
     foundWrapCapableMeshNames,
     nativePlateMeshNames,
     originalFactoryMaterialsByMeshUuid,
@@ -524,6 +546,29 @@ function logMissingWrapCapableMeshes(preparedScene: PreparedModelScene) {
   console.table(missingMeshNames)
 }
 
+function logMissingTintableMeshes(preparedScene: PreparedModelScene) {
+  if (
+    !import.meta.env.DEV ||
+    inspectedTintableMeshScenes.has(preparedScene.scene)
+  ) {
+    return
+  }
+
+  inspectedTintableMeshScenes.add(preparedScene.scene)
+
+  const missingMeshNames = TINTABLE_GLASS_MESH_NAMES.filter(
+    (meshName) => !preparedScene.foundTintableMeshNames.has(meshName),
+  )
+
+  if (missingMeshNames.length === 0) {
+    console.info('All registered tintable glass meshes were found in Mahir S4.glb.')
+    return
+  }
+
+  console.warn('Registered tintable glass meshes not found in Mahir S4.glb')
+  console.table(missingMeshNames)
+}
+
 function copyMaterialState(
   target: Material | Material[],
   source: Material | Material[],
@@ -638,6 +683,119 @@ function applyWrapMaterials(
 
     if (wrap) {
       applyWrapToMesh(object, wrap)
+    }
+  })
+}
+
+function clampTintVlt(vlt: number): number {
+  if (!Number.isFinite(vlt)) {
+    return 35
+  }
+
+  return Math.min(100, Math.max(5, vlt))
+}
+
+function getTintDarkness(vlt: number): number {
+  return (100 - clampTintVlt(vlt)) / 95
+}
+
+function getTintColor(vlt: number): Color {
+  const darkness = getTintDarkness(vlt)
+  const color = new Color('#9aa4ad')
+
+  color.lerp(new Color('#050608'), darkness)
+  return color
+}
+
+function getTintAttenuationColor(vlt: number): Color {
+  const darkness = getTintDarkness(vlt)
+  const color = new Color('#c7d0d7')
+
+  color.lerp(new Color('#020304'), darkness)
+  return color
+}
+
+function applyTintToMaterial(material: Material, tint: TintConfig) {
+  if (!(material instanceof MeshStandardMaterial)) {
+    return
+  }
+
+  const darkness = getTintDarkness(tint.vlt)
+
+  material.color.copy(getTintColor(tint.vlt))
+  material.transparent = true
+  material.opacity = 0.22 + darkness * 0.5
+  material.depthWrite = false
+  material.metalness = 0
+  material.roughness = 0.035 + darkness * 0.08
+  material.envMapIntensity = 1.22 + darkness * 0.34
+
+  if (material instanceof MeshPhysicalMaterial) {
+    material.clearcoat = 0.52 + darkness * 0.18
+    material.clearcoatRoughness = 0.035 + darkness * 0.04
+    material.reflectivity = 0.72 + darkness * 0.18
+    material.transmission = 0.9 - darkness * 0.48
+    material.thickness = 0.18 + darkness * 0.58
+    material.attenuationColor.copy(getTintAttenuationColor(tint.vlt))
+    material.attenuationDistance = 3.2 - darkness * 2.72
+    material.ior = 1.45
+  }
+
+  material.needsUpdate = true
+}
+
+function applyTintToMesh(mesh: ModelMesh, tint: TintConfig) {
+  for (const material of getMaterials(mesh.material)) {
+    applyTintToMaterial(material, tint)
+  }
+}
+
+function getEffectiveTintForMesh(
+  meshName: string,
+  appliedDesign: AppliedDesignState,
+  tintPreview: TintPreviewState | null,
+  previewTargetIds: Set<string>,
+): TintConfig | null {
+  if (!tintableMeshNames.has(meshName)) {
+    return null
+  }
+
+  const part = getSelectablePartByMeshName(meshName)
+
+  if (!part?.services.includes('tint')) {
+    return null
+  }
+
+  if (tintPreview && previewTargetIds.has(part.id)) {
+    return tintPreview.tint
+  }
+
+  return appliedDesign.parts[part.id]?.tint ?? null
+}
+
+function applyTintMaterials(
+  preparedScene: PreparedModelScene,
+  appliedDesign: AppliedDesignState,
+  tintPreview: TintPreviewState | null,
+) {
+  const previewTargetIds = new Set(tintPreview?.targetIds ?? [])
+
+  preparedScene.scene.traverse((object) => {
+    if (!isModelMesh(object) || !tintableMeshNames.has(object.name)) {
+      return
+    }
+
+    resetMeshMaterialToFactory(object, preparedScene)
+
+    const tint = getEffectiveTintForMesh(
+      object.name,
+      appliedDesign,
+      tintPreview,
+      previewTargetIds,
+    )
+
+    if (tint) {
+      applyTintToMesh(object, tint)
     }
   })
 }
@@ -764,6 +922,7 @@ export function S4Model({
   appliedDesign,
   controlsRef,
   selectedTargetId,
+  tintPreview,
   wrapPreview,
   onPartSelect,
   onSelectionClear,
@@ -832,8 +991,16 @@ export function S4Model({
   }, [preparedScene])
 
   useEffect(() => {
+    logMissingTintableMeshes(preparedScene)
+  }, [preparedScene])
+
+  useEffect(() => {
     applyWrapMaterials(preparedScene, appliedDesign, wrapPreview)
   }, [appliedDesign, preparedScene, wrapPreview])
+
+  useEffect(() => {
+    applyTintMaterials(preparedScene, appliedDesign, tintPreview)
+  }, [appliedDesign, preparedScene, tintPreview])
 
   useEffect(() => {
     applyOutlines(modelScene, selectedMeshNames, hoveredMeshNames)

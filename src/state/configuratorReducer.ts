@@ -1,7 +1,9 @@
 import {
   FULL_BODY_PART_IDS,
   FULL_BODY_TARGET_ID,
+  getDefaultTintScope,
   getSelectionTarget,
+  resolveTintScopeTargetIds,
 } from '../config/vehicleParts'
 import type {
   AppliedDesignState,
@@ -9,6 +11,8 @@ import type {
   LayeredSurfaceState,
   SelectionTargetId,
   ServiceId,
+  TintConfig,
+  TintScope,
   WrapConfig,
   WrapFinish,
 } from '../types/configurator'
@@ -16,6 +20,10 @@ import type {
 const DEFAULT_WRAP_CONFIG: WrapConfig = {
   color: '#c49d59',
   finish: 'gloss',
+}
+
+const DEFAULT_TINT_CONFIG: TintConfig = {
+  vlt: 35,
 }
 
 export type ConfiguratorState = {
@@ -37,6 +45,14 @@ export type ConfiguratorAction =
       patch: Partial<WrapConfig>
     }
   | {
+      type: 'update-tint-draft'
+      patch: Partial<TintConfig>
+    }
+  | {
+      type: 'update-tint-scope'
+      scope: TintScope
+    }
+  | {
       type: 'clear-service'
     }
   | {
@@ -53,12 +69,18 @@ export type ConfiguratorAction =
       targetId: SelectionTargetId
     }
   | {
+      type: 'reset-tint'
+      targetId: SelectionTargetId
+      scope: TintScope
+    }
+  | {
       type: 'reset-all-wraps'
     }
 
 function createLayeredSurfaceState(): LayeredSurfaceState {
   return {
     wrap: null,
+    tint: null,
     artwork: null,
     ppf: null,
     ceramic: null,
@@ -76,6 +98,13 @@ function applyServiceToSurface(
     return {
       ...surfaceState,
       wrap: DEFAULT_WRAP_CONFIG,
+    }
+  }
+
+  if (serviceId === 'tint') {
+    return {
+      ...surfaceState,
+      tint: DEFAULT_TINT_CONFIG,
     }
   }
 
@@ -128,6 +157,25 @@ function clearWrapFromSurface(
   }
 }
 
+function setTintOnSurface(
+  surfaceState: LayeredSurfaceState,
+  tintConfig: TintConfig,
+): LayeredSurfaceState {
+  return {
+    ...surfaceState,
+    tint: tintConfig,
+  }
+}
+
+function clearTintFromSurface(
+  surfaceState: LayeredSurfaceState,
+): LayeredSurfaceState {
+  return {
+    ...surfaceState,
+    tint: null,
+  }
+}
+
 function getAppliedWrapForTarget(
   appliedDesign: AppliedDesignState,
   targetId: SelectionTargetId,
@@ -157,6 +205,20 @@ function createWrapDraft(
   return getAppliedWrapForTarget(appliedDesign, targetId) ?? DEFAULT_WRAP_CONFIG
 }
 
+function getAppliedTintForTarget(
+  appliedDesign: AppliedDesignState,
+  targetId: SelectionTargetId,
+): TintConfig | null {
+  return appliedDesign.parts[targetId]?.tint ?? null
+}
+
+function createTintDraft(
+  appliedDesign: AppliedDesignState,
+  targetId: SelectionTargetId,
+): TintConfig {
+  return getAppliedTintForTarget(appliedDesign, targetId) ?? DEFAULT_TINT_CONFIG
+}
+
 function updateWrapDraft(
   currentWrap: WrapConfig,
   patch: Partial<WrapConfig>,
@@ -169,8 +231,27 @@ function updateWrapDraft(
   }
 }
 
+function updateTintDraft(
+  currentTint: TintConfig,
+  patch: Partial<TintConfig>,
+): TintConfig {
+  const patchedVlt = patch.vlt ?? currentTint.vlt
+
+  return {
+    vlt: clampTintVlt(patchedVlt),
+  }
+}
+
 function isWrapFinish(finish: WrapFinish | undefined): finish is WrapFinish {
   return finish === 'gloss' || finish === 'satin' || finish === 'matte'
+}
+
+function clampTintVlt(vlt: number): number {
+  if (!Number.isFinite(vlt)) {
+    return DEFAULT_TINT_CONFIG.vlt
+  }
+
+  return Math.min(100, Math.max(5, Math.round(vlt)))
 }
 
 function clearFullBodyPartWraps(
@@ -183,6 +264,41 @@ function clearFullBodyPartWraps(
     nextParts[partId] = fullBodyPartIds.has(partId)
       ? clearWrapFromSurface(partState)
       : partState
+  }
+
+  return nextParts
+}
+
+function setTintForTargetIds(
+  parts: AppliedDesignState['parts'],
+  targetIds: readonly SelectionTargetId[],
+  tintConfig: TintConfig,
+): AppliedDesignState['parts'] {
+  const nextParts: AppliedDesignState['parts'] = {
+    ...parts,
+  }
+
+  for (const targetId of targetIds) {
+    const currentPartState = nextParts[targetId] ?? createLayeredSurfaceState()
+
+    nextParts[targetId] = setTintOnSurface(currentPartState, tintConfig)
+  }
+
+  return nextParts
+}
+
+function clearTintForTargetIds(
+  parts: AppliedDesignState['parts'],
+  targetIds: readonly SelectionTargetId[],
+): AppliedDesignState['parts'] {
+  const nextParts: AppliedDesignState['parts'] = {
+    ...parts,
+  }
+
+  for (const targetId of targetIds) {
+    const currentPartState = nextParts[targetId] ?? createLayeredSurfaceState()
+
+    nextParts[targetId] = clearTintFromSurface(currentPartState)
   }
 
   return nextParts
@@ -213,6 +329,8 @@ export function configuratorReducer(
         targetId: target.id,
         serviceId: null,
         wrapConfig: null,
+        tintConfig: null,
+        tintScope: null,
       },
     }
   }
@@ -226,6 +344,14 @@ export function configuratorReducer(
       action.serviceId === 'wrap'
         ? createWrapDraft(state.appliedDesign, state.draftSelection.targetId)
         : null
+    const defaultTintScope =
+      action.serviceId === 'tint'
+        ? getDefaultTintScope(state.draftSelection.targetId)
+        : null
+    const tintConfig =
+      action.serviceId === 'tint' && defaultTintScope
+        ? createTintDraft(state.appliedDesign, state.draftSelection.targetId)
+        : null
 
     return {
       ...state,
@@ -233,6 +359,8 @@ export function configuratorReducer(
         ...state.draftSelection,
         serviceId: action.serviceId,
         wrapConfig,
+        tintConfig,
+        tintScope: defaultTintScope,
       },
     }
   }
@@ -257,6 +385,51 @@ export function configuratorReducer(
     }
   }
 
+  if (action.type === 'update-tint-draft') {
+    const draftSelection = state.draftSelection
+
+    if (draftSelection?.serviceId !== 'tint') {
+      return state
+    }
+
+    const currentTint =
+      draftSelection.tintConfig ??
+      createTintDraft(state.appliedDesign, draftSelection.targetId)
+
+    return {
+      ...state,
+      draftSelection: {
+        ...draftSelection,
+        tintConfig: updateTintDraft(currentTint, action.patch),
+      },
+    }
+  }
+
+  if (action.type === 'update-tint-scope') {
+    const draftSelection = state.draftSelection
+
+    if (draftSelection?.serviceId !== 'tint') {
+      return state
+    }
+
+    if (
+      resolveTintScopeTargetIds(
+        draftSelection.targetId,
+        action.scope,
+      ).length === 0
+    ) {
+      return state
+    }
+
+    return {
+      ...state,
+      draftSelection: {
+        ...draftSelection,
+        tintScope: action.scope,
+      },
+    }
+  }
+
   if (action.type === 'clear-service') {
     if (!state.draftSelection) {
       return state
@@ -268,6 +441,8 @@ export function configuratorReducer(
         ...state.draftSelection,
         serviceId: null,
         wrapConfig: null,
+        tintConfig: null,
+        tintScope: null,
       },
     }
   }
@@ -320,6 +495,34 @@ export function configuratorReducer(
               draftSelection.wrapConfig,
             ),
           },
+        },
+        draftSelection: null,
+      }
+    }
+
+    if (draftSelection.serviceId === 'tint') {
+      if (!draftSelection.tintConfig || !draftSelection.tintScope) {
+        return state
+      }
+
+      const tintTargetIds = resolveTintScopeTargetIds(
+        draftSelection.targetId,
+        draftSelection.tintScope,
+      )
+
+      if (tintTargetIds.length === 0) {
+        return state
+      }
+
+      return {
+        ...state,
+        appliedDesign: {
+          ...state.appliedDesign,
+          parts: setTintForTargetIds(
+            state.appliedDesign.parts,
+            tintTargetIds,
+            draftSelection.tintConfig,
+          ),
         },
         draftSelection: null,
       }
@@ -407,6 +610,26 @@ export function configuratorReducer(
           ...state.appliedDesign.parts,
           [action.targetId]: clearWrapFromSurface(currentPartState),
         },
+      },
+      draftSelection: null,
+    }
+  }
+
+  if (action.type === 'reset-tint') {
+    const tintTargetIds = resolveTintScopeTargetIds(
+      action.targetId,
+      action.scope,
+    )
+
+    if (tintTargetIds.length === 0) {
+      return state
+    }
+
+    return {
+      ...state,
+      appliedDesign: {
+        ...state.appliedDesign,
+        parts: clearTintForTargetIds(state.appliedDesign.parts, tintTargetIds),
       },
       draftSelection: null,
     }

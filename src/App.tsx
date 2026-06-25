@@ -2,7 +2,9 @@ import { useMemo, useReducer, useRef, type PointerEvent } from 'react'
 import {
   FULL_BODY_PART_IDS,
   FULL_BODY_TARGET_ID,
+  getTintScopeOptions,
   getSelectionTarget,
+  resolveTintScopeTargetIds,
 } from './config/vehicleParts'
 import { PartServicePopup } from './components/viewer/PartServicePopup'
 import {
@@ -13,7 +15,7 @@ import {
   configuratorReducer,
   initialConfiguratorState,
 } from './state/configuratorReducer'
-import type { WrapPreviewState } from './types/configurator'
+import type { TintPreviewState, WrapPreviewState } from './types/configurator'
 import './App.css'
 
 const viewerControls = [
@@ -56,6 +58,32 @@ function App() {
     }
   }, [configuratorState.draftSelection])
 
+  const tintPreview = useMemo<TintPreviewState | null>(() => {
+    const draftSelection = configuratorState.draftSelection
+
+    if (
+      draftSelection?.serviceId !== 'tint' ||
+      !draftSelection.tintConfig ||
+      !draftSelection.tintScope
+    ) {
+      return null
+    }
+
+    const targetIds = resolveTintScopeTargetIds(
+      draftSelection.targetId,
+      draftSelection.tintScope,
+    )
+
+    if (targetIds.length === 0) {
+      return null
+    }
+
+    return {
+      targetIds,
+      tint: draftSelection.tintConfig,
+    }
+  }, [configuratorState.draftSelection])
+
   const hasFullBodyWrapOverrides = FULL_BODY_PART_IDS.some((partId) =>
     Boolean(configuratorState.appliedDesign.parts[partId]?.wrap),
   )
@@ -70,6 +98,20 @@ function App() {
     activeTarget?.id === FULL_BODY_TARGET_ID &&
     (Boolean(configuratorState.appliedDesign.fullBody.wrap) ||
       hasFullBodyWrapOverrides)
+  const activeTintScope =
+    configuratorState.draftSelection?.serviceId === 'tint'
+      ? configuratorState.draftSelection.tintScope
+      : null
+  const tintScopeOptions = activeTarget
+    ? getTintScopeOptions(activeTarget.id)
+    : []
+  const canResetTint =
+    activeTarget && activeTintScope
+      ? resolveTintScopeTargetIds(activeTarget.id, activeTintScope).some(
+          (targetId) =>
+            Boolean(configuratorState.appliedDesign.parts[targetId]?.tint),
+        )
+      : false
 
   function handleShellPointerDown(event: PointerEvent<HTMLElement>) {
     if (!configuratorState.draftSelection) {
@@ -132,6 +174,7 @@ function App() {
             appliedDesign={configuratorState.appliedDesign}
             ref={vehicleViewerRef}
             selectedTargetId={configuratorState.draftSelection?.targetId ?? null}
+            tintPreview={tintPreview}
             wrapPreview={wrapPreview}
             onPartSelect={(partId) =>
               dispatch({ type: 'select-target', targetId: partId })
@@ -154,11 +197,15 @@ function App() {
                 configuratorState.draftSelection?.serviceId ?? null
               }
               wrapConfig={configuratorState.draftSelection?.wrapConfig ?? null}
+              tintConfig={configuratorState.draftSelection?.tintConfig ?? null}
+              tintScope={configuratorState.draftSelection?.tintScope ?? null}
+              tintScopeOptions={tintScopeOptions}
               canApplyAllWraps={
                 activeTarget.id === FULL_BODY_TARGET_ID &&
                 hasFullBodyWrapOverrides
               }
               canResetAllWraps={canResetAllWraps}
+              canResetTint={canResetTint}
               canResetWrap={activeTargetHasDirectWrap}
               onApply={() => dispatch({ type: 'apply-draft' })}
               onApplyAll={() => dispatch({ type: 'apply-wrap-all' })}
@@ -166,6 +213,15 @@ function App() {
               onCancel={() => dispatch({ type: 'cancel-draft' })}
               onClose={() => dispatch({ type: 'cancel-draft' })}
               onResetAllWraps={() => dispatch({ type: 'reset-all-wraps' })}
+              onResetTint={() =>
+                activeTintScope
+                  ? dispatch({
+                      type: 'reset-tint',
+                      targetId: activeTarget.id,
+                      scope: activeTintScope,
+                    })
+                  : undefined
+              }
               onResetWrap={() =>
                 dispatch({ type: 'reset-wrap', targetId: activeTarget.id })
               }
@@ -174,6 +230,12 @@ function App() {
               }
               onUpdateWrapDraft={(patch) =>
                 dispatch({ type: 'update-wrap-draft', patch })
+              }
+              onUpdateTintDraft={(patch) =>
+                dispatch({ type: 'update-tint-draft', patch })
+              }
+              onUpdateTintScope={(scope) =>
+                dispatch({ type: 'update-tint-scope', scope })
               }
             />
           ) : null}

@@ -224,7 +224,20 @@
   text-transform: uppercase;
 }
 
-.part-popup-hex-input:focus-visible {
+.part-popup-vlt-input {
+  width: 64px;
+  min-height: 34px;
+  padding: 0 8px;
+  border: 1px solid rgba(196, 157, 89, 0.42);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: rgba(9, 9, 9, 0.82);
+  font: inherit;
+  font-size: 0.82rem;
+}
+
+.part-popup-hex-input:focus-visible,
+.part-popup-vlt-input:focus-visible {
   outline: 2px solid var(--gold);
   outline-offset: 3px;
 }
@@ -243,6 +256,12 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
+}
+
+.part-popup-tint-custom-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .part-popup-finish {
