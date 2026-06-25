@@ -12,6 +12,10 @@ import { MOUSE, TOUCH } from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { S4Model } from './S4Model'
 import { ViewerErrorBoundary } from './ViewerErrorBoundary'
+import type {
+  AppliedDesignState,
+  WrapPreviewState,
+} from '../../types/configurator'
 import './VehicleViewer.css'
 
 const INITIAL_VIEW_SAVE_DELAY_MS = 1100
@@ -23,7 +27,9 @@ export type VehicleViewerHandle = {
 }
 
 type VehicleViewerProps = {
+  appliedDesign: AppliedDesignState
   selectedTargetId: string | null
+  wrapPreview: WrapPreviewState | null
   onPartSelect: (partId: string) => void
   onScenePointerMissed: () => void
 }
@@ -53,8 +59,8 @@ function VehicleErrorState() {
     <div className="vehicle-viewer-error" role="alert">
       <div>
         <span className="vehicle-viewer-kicker">Viewer unavailable</span>
-        <h3>Vehicle model could not be loaded</h3>
-        <p>Please confirm that /Mahir S4.glb is available in the public folder.</p>
+        <h3>Vehicle viewer could not start</h3>
+        <p>Open the browser Console for the exact runtime error and stack trace.</p>
       </div>
     </div>
   )
@@ -118,17 +124,21 @@ function InitialViewState({ controlsRef, onResetReady }: InitialViewStateProps) 
 }
 
 type ViewerSceneProps = {
+  appliedDesign: AppliedDesignState
   onResetReady: (resetView: () => void) => void
   onPartSelect: (partId: string) => void
   onScenePointerMissed: () => void
   selectedTargetId: string | null
+  wrapPreview: WrapPreviewState | null
 }
 
 function ViewerScene({
+  appliedDesign,
   onPartSelect,
   onResetReady,
   onScenePointerMissed,
   selectedTargetId,
+  wrapPreview,
 }: ViewerSceneProps) {
   const controlsRef = useRef<OrbitControlsImpl | null>(null)
 
@@ -162,8 +172,10 @@ function ViewerScene({
         <Bounds fit clip observe margin={1.18} maxDuration={0.9}>
           <InitialViewState controlsRef={controlsRef} onResetReady={onResetReady} />
           <S4Model
+            appliedDesign={appliedDesign}
             controlsRef={controlsRef}
             selectedTargetId={selectedTargetId}
+            wrapPreview={wrapPreview}
             onPartSelect={onPartSelect}
             onSelectionClear={onScenePointerMissed}
           />
@@ -175,7 +187,13 @@ function ViewerScene({
 
 export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>(
   function VehicleViewer(
-    { onPartSelect, onScenePointerMissed, selectedTargetId },
+    {
+      appliedDesign,
+      onPartSelect,
+      onScenePointerMissed,
+      selectedTargetId,
+      wrapPreview,
+    },
     ref,
   ) {
   const resetViewRef = useRef<() => void>(() => undefined)
@@ -212,11 +230,12 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
           className="vehicle-viewer-canvas"
           dpr={[1, 2]}
           gl={{ antialias: true, powerPreference: 'high-performance' }}
-          onPointerMissed={onScenePointerMissed}
           shadows="percentage"
         >
           <ViewerScene
+            appliedDesign={appliedDesign}
             selectedTargetId={selectedTargetId}
+            wrapPreview={wrapPreview}
             onPartSelect={onPartSelect}
             onScenePointerMissed={onScenePointerMissed}
             onResetReady={handleResetReady}

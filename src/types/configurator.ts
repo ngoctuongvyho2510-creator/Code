@@ -60,15 +60,22 @@ export type ServiceDefinition = {
 
 export type SelectionTargetId = string
 
+export type WrapFinish = 'gloss' | 'satin' | 'matte'
+
+export type WrapConfig = {
+  color: string
+  finish: WrapFinish
+}
+
 export type AppliedServiceState = {
   serviceId: ServiceId
 }
 
 export type LayeredSurfaceState = {
-  wrap?: AppliedServiceState
-  artwork?: AppliedServiceState
-  ppf?: AppliedServiceState
-  ceramic?: AppliedServiceState
+  wrap: WrapConfig | null
+  artwork: AppliedServiceState | null
+  ppf: AppliedServiceState | null
+  ceramic: AppliedServiceState | null
   services: Partial<Record<ServiceId, AppliedServiceState>>
 }
 
@@ -80,4 +87,10 @@ export type AppliedDesignState = {
 export type DraftSelectionState = {
   targetId: SelectionTargetId
   serviceId: ServiceId | null
+  wrapConfig: WrapConfig | null
+}
+
+export type WrapPreviewState = {
+  targetId: SelectionTargetId
+  wrap: WrapConfig
 }

@@ -1,5 +1,9 @@
 import { useMemo, useReducer, useRef, type PointerEvent } from 'react'
-import { FULL_BODY_TARGET_ID, getSelectionTarget } from './config/vehicleParts'
+import {
+  FULL_BODY_PART_IDS,
+  FULL_BODY_TARGET_ID,
+  getSelectionTarget,
+} from './config/vehicleParts'
 import { PartServicePopup } from './components/viewer/PartServicePopup'
 import {
   VehicleViewer,
@@ -9,6 +13,7 @@ import {
   configuratorReducer,
   initialConfiguratorState,
 } from './state/configuratorReducer'
+import type { WrapPreviewState } from './types/configurator'
 import './App.css'
 
 const viewerControls = [
@@ -37,6 +42,34 @@ function App() {
 
     return getSelectionTarget(draftSelection.targetId)
   }, [configuratorState.draftSelection])
+
+  const wrapPreview = useMemo<WrapPreviewState | null>(() => {
+    const draftSelection = configuratorState.draftSelection
+
+    if (draftSelection?.serviceId !== 'wrap' || !draftSelection.wrapConfig) {
+      return null
+    }
+
+    return {
+      targetId: draftSelection.targetId,
+      wrap: draftSelection.wrapConfig,
+    }
+  }, [configuratorState.draftSelection])
+
+  const hasFullBodyWrapOverrides = FULL_BODY_PART_IDS.some((partId) =>
+    Boolean(configuratorState.appliedDesign.parts[partId]?.wrap),
+  )
+
+  const activeTargetHasDirectWrap = activeTarget
+    ? activeTarget.id === FULL_BODY_TARGET_ID
+      ? Boolean(configuratorState.appliedDesign.fullBody.wrap)
+      : Boolean(configuratorState.appliedDesign.parts[activeTarget.id]?.wrap)
+    : false
+
+  const canResetAllWraps =
+    activeTarget?.id === FULL_BODY_TARGET_ID &&
+    (Boolean(configuratorState.appliedDesign.fullBody.wrap) ||
+      hasFullBodyWrapOverrides)
 
   function handleShellPointerDown(event: PointerEvent<HTMLElement>) {
     if (!configuratorState.draftSelection) {
@@ -96,8 +129,10 @@ function App() {
             Vehicle viewer
           </h2>
           <VehicleViewer
+            appliedDesign={configuratorState.appliedDesign}
             ref={vehicleViewerRef}
             selectedTargetId={configuratorState.draftSelection?.targetId ?? null}
+            wrapPreview={wrapPreview}
             onPartSelect={(partId) =>
               dispatch({ type: 'select-target', targetId: partId })
             }
@@ -118,11 +153,27 @@ function App() {
               selectedServiceId={
                 configuratorState.draftSelection?.serviceId ?? null
               }
+              wrapConfig={configuratorState.draftSelection?.wrapConfig ?? null}
+              canApplyAllWraps={
+                activeTarget.id === FULL_BODY_TARGET_ID &&
+                hasFullBodyWrapOverrides
+              }
+              canResetAllWraps={canResetAllWraps}
+              canResetWrap={activeTargetHasDirectWrap}
               onApply={() => dispatch({ type: 'apply-draft' })}
+              onApplyAll={() => dispatch({ type: 'apply-wrap-all' })}
               onBack={handleBack}
+              onCancel={() => dispatch({ type: 'cancel-draft' })}
               onClose={() => dispatch({ type: 'cancel-draft' })}
+              onResetAllWraps={() => dispatch({ type: 'reset-all-wraps' })}
+              onResetWrap={() =>
+                dispatch({ type: 'reset-wrap', targetId: activeTarget.id })
+              }
               onSelectService={(serviceId) =>
                 dispatch({ type: 'select-service', serviceId })
+              }
+              onUpdateWrapDraft={(patch) =>
+                dispatch({ type: 'update-wrap-draft', patch })
               }
             />
           ) : null}

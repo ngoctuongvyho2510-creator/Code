@@ -63,6 +63,7 @@
 .full-body-action,
 .part-popup-link,
 .part-popup-service,
+.part-popup-finish,
 .part-popup-apply {
   border: 1px solid var(--panel-border);
   border-radius: 6px;
@@ -160,10 +161,95 @@
 }
 
 .part-popup-service:hover,
-.part-popup-service[data-selected='true'] {
+.part-popup-service[data-selected='true'],
+.part-popup-finish:hover,
+.part-popup-finish[data-selected='true'] {
   border-color: rgba(196, 157, 89, 0.8);
   color: var(--text-primary);
   background: rgba(196, 157, 89, 0.16);
+}
+
+.part-popup-wrap {
+  display: grid;
+  gap: 14px;
+  margin: 14px 0;
+}
+
+.part-popup-field {
+  display: grid;
+  gap: 8px;
+}
+
+.part-popup-field span,
+.part-popup-finish-label {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.part-popup-color-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.part-popup-color-input {
+  width: 48px;
+  height: 34px;
+  padding: 2px;
+  border: 1px solid rgba(196, 157, 89, 0.42);
+  border-radius: 6px;
+  background: #090909;
+  cursor: pointer;
+}
+
+.part-popup-color-input:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
+}
+
+.part-popup-hex-input {
+  width: 88px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid rgba(196, 157, 89, 0.42);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: rgba(9, 9, 9, 0.82);
+  font: inherit;
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.part-popup-hex-input:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
+}
+
+.part-popup-color-value {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+}
+
+.part-popup-finish-label {
+  margin: 0 0 8px;
+}
+
+.part-popup-finish-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.part-popup-finish {
+  min-height: 34px;
+  padding: 0 8px;
+  color: var(--text-secondary);
+  cursor: pointer;
 }
 
 .part-popup-link {
@@ -180,6 +266,11 @@
   background: var(--gold);
   border-color: var(--gold);
   cursor: pointer;
+}
+
+.part-popup-actions--wrap {
+  flex-wrap: wrap;
+  justify-content: flex-start;
 }
 
 .viewer-toolbar {

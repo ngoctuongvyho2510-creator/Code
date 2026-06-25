@@ -24,7 +24,11 @@ export class ViewerErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('Vehicle model viewer error', error, errorInfo)
+    console.group('Vehicle viewer runtime error')
+    console.error(error)
+    console.error('Error stack', error.stack ?? '(no stack available)')
+    console.error('React component stack', errorInfo.componentStack)
+    console.groupEnd()
   }
 
   render() {

@@ -1,11 +1,22 @@
-import { FULL_BODY_TARGET_ID, getSelectionTarget } from '../config/vehicleParts'
+import {
+  FULL_BODY_PART_IDS,
+  FULL_BODY_TARGET_ID,
+  getSelectionTarget,
+} from '../config/vehicleParts'
 import type {
   AppliedDesignState,
   DraftSelectionState,
   LayeredSurfaceState,
   SelectionTargetId,
   ServiceId,
+  WrapConfig,
+  WrapFinish,
 } from '../types/configurator'
+
+const DEFAULT_WRAP_CONFIG: WrapConfig = {
+  color: '#c49d59',
+  finish: 'gloss',
+}
 
 export type ConfiguratorState = {
   appliedDesign: AppliedDesignState
@@ -22,6 +33,10 @@ export type ConfiguratorAction =
       serviceId: ServiceId
     }
   | {
+      type: 'update-wrap-draft'
+      patch: Partial<WrapConfig>
+    }
+  | {
       type: 'clear-service'
     }
   | {
@@ -30,9 +45,23 @@ export type ConfiguratorAction =
   | {
       type: 'apply-draft'
     }
+  | {
+      type: 'apply-wrap-all'
+    }
+  | {
+      type: 'reset-wrap'
+      targetId: SelectionTargetId
+    }
+  | {
+      type: 'reset-all-wraps'
+    }
 
 function createLayeredSurfaceState(): LayeredSurfaceState {
   return {
+    wrap: null,
+    artwork: null,
+    ppf: null,
+    ceramic: null,
     services: {},
   }
 }
@@ -46,7 +75,7 @@ function applyServiceToSurface(
   if (serviceId === 'wrap') {
     return {
       ...surfaceState,
-      wrap: appliedService,
+      wrap: DEFAULT_WRAP_CONFIG,
     }
   }
 
@@ -80,6 +109,85 @@ function applyServiceToSurface(
   }
 }
 
+function setWrapOnSurface(
+  surfaceState: LayeredSurfaceState,
+  wrapConfig: WrapConfig,
+): LayeredSurfaceState {
+  return {
+    ...surfaceState,
+    wrap: wrapConfig,
+  }
+}
+
+function clearWrapFromSurface(
+  surfaceState: LayeredSurfaceState,
+): LayeredSurfaceState {
+  return {
+    ...surfaceState,
+    wrap: null,
+  }
+}
+
+function getAppliedWrapForTarget(
+  appliedDesign: AppliedDesignState,
+  targetId: SelectionTargetId,
+): WrapConfig | null {
+  if (targetId === FULL_BODY_TARGET_ID) {
+    return appliedDesign.fullBody.wrap
+  }
+
+  const target = getSelectionTarget(targetId)
+  const partWrap = appliedDesign.parts[targetId]?.wrap ?? null
+
+  if (partWrap) {
+    return partWrap
+  }
+
+  if (target?.fullBody) {
+    return appliedDesign.fullBody.wrap
+  }
+
+  return null
+}
+
+function createWrapDraft(
+  appliedDesign: AppliedDesignState,
+  targetId: SelectionTargetId,
+): WrapConfig {
+  return getAppliedWrapForTarget(appliedDesign, targetId) ?? DEFAULT_WRAP_CONFIG
+}
+
+function updateWrapDraft(
+  currentWrap: WrapConfig,
+  patch: Partial<WrapConfig>,
+): WrapConfig {
+  const finish = patch.finish
+
+  return {
+    color: patch.color ?? currentWrap.color,
+    finish: isWrapFinish(finish) ? finish : currentWrap.finish,
+  }
+}
+
+function isWrapFinish(finish: WrapFinish | undefined): finish is WrapFinish {
+  return finish === 'gloss' || finish === 'satin' || finish === 'matte'
+}
+
+function clearFullBodyPartWraps(
+  parts: AppliedDesignState['parts'],
+): AppliedDesignState['parts'] {
+  const fullBodyPartIds = new Set(FULL_BODY_PART_IDS)
+  const nextParts: AppliedDesignState['parts'] = {}
+
+  for (const [partId, partState] of Object.entries(parts)) {
+    nextParts[partId] = fullBodyPartIds.has(partId)
+      ? clearWrapFromSurface(partState)
+      : partState
+  }
+
+  return nextParts
+}
+
 export const initialConfiguratorState: ConfiguratorState = {
   appliedDesign: {
     fullBody: createLayeredSurfaceState(),
@@ -104,6 +212,7 @@ export function configuratorReducer(
       draftSelection: {
         targetId: target.id,
         serviceId: null,
+        wrapConfig: null,
       },
     }
   }
@@ -113,11 +222,37 @@ export function configuratorReducer(
       return state
     }
 
+    const wrapConfig =
+      action.serviceId === 'wrap'
+        ? createWrapDraft(state.appliedDesign, state.draftSelection.targetId)
+        : null
+
     return {
       ...state,
       draftSelection: {
         ...state.draftSelection,
         serviceId: action.serviceId,
+        wrapConfig,
+      },
+    }
+  }
+
+  if (action.type === 'update-wrap-draft') {
+    const draftSelection = state.draftSelection
+
+    if (draftSelection?.serviceId !== 'wrap') {
+      return state
+    }
+
+    const currentWrap =
+      draftSelection.wrapConfig ??
+      createWrapDraft(state.appliedDesign, draftSelection.targetId)
+
+    return {
+      ...state,
+      draftSelection: {
+        ...draftSelection,
+        wrapConfig: updateWrapDraft(currentWrap, action.patch),
       },
     }
   }
@@ -132,6 +267,7 @@ export function configuratorReducer(
       draftSelection: {
         ...state.draftSelection,
         serviceId: null,
+        wrapConfig: null,
       },
     }
   }
@@ -148,6 +284,45 @@ export function configuratorReducer(
 
     if (!draftSelection?.serviceId) {
       return state
+    }
+
+    if (draftSelection.serviceId === 'wrap') {
+      if (!draftSelection.wrapConfig) {
+        return state
+      }
+
+      if (draftSelection.targetId === FULL_BODY_TARGET_ID) {
+        return {
+          ...state,
+          appliedDesign: {
+            ...state.appliedDesign,
+            fullBody: setWrapOnSurface(
+              state.appliedDesign.fullBody,
+              draftSelection.wrapConfig,
+            ),
+          },
+          draftSelection: null,
+        }
+      }
+
+      const currentPartState =
+        state.appliedDesign.parts[draftSelection.targetId] ??
+        createLayeredSurfaceState()
+
+      return {
+        ...state,
+        appliedDesign: {
+          ...state.appliedDesign,
+          parts: {
+            ...state.appliedDesign.parts,
+            [draftSelection.targetId]: setWrapOnSurface(
+              currentPartState,
+              draftSelection.wrapConfig,
+            ),
+          },
+        },
+        draftSelection: null,
+      }
     }
 
     if (draftSelection.targetId === FULL_BODY_TARGET_ID) {
@@ -179,6 +354,71 @@ export function configuratorReducer(
             draftSelection.serviceId,
           ),
         },
+      },
+      draftSelection: null,
+    }
+  }
+
+  if (action.type === 'apply-wrap-all') {
+    const draftSelection = state.draftSelection
+
+    if (
+      draftSelection?.targetId !== FULL_BODY_TARGET_ID ||
+      draftSelection.serviceId !== 'wrap' ||
+      !draftSelection.wrapConfig
+    ) {
+      return state
+    }
+
+    return {
+      ...state,
+      appliedDesign: {
+        ...state.appliedDesign,
+        fullBody: setWrapOnSurface(
+          state.appliedDesign.fullBody,
+          draftSelection.wrapConfig,
+        ),
+        parts: clearFullBodyPartWraps(state.appliedDesign.parts),
+      },
+      draftSelection: null,
+    }
+  }
+
+  if (action.type === 'reset-wrap') {
+    if (action.targetId === FULL_BODY_TARGET_ID) {
+      return {
+        ...state,
+        appliedDesign: {
+          ...state.appliedDesign,
+          fullBody: clearWrapFromSurface(state.appliedDesign.fullBody),
+        },
+        draftSelection: null,
+      }
+    }
+
+    const currentPartState =
+      state.appliedDesign.parts[action.targetId] ?? createLayeredSurfaceState()
+
+    return {
+      ...state,
+      appliedDesign: {
+        ...state.appliedDesign,
+        parts: {
+          ...state.appliedDesign.parts,
+          [action.targetId]: clearWrapFromSurface(currentPartState),
+        },
+      },
+      draftSelection: null,
+    }
+  }
+
+  if (action.type === 'reset-all-wraps') {
+    return {
+      ...state,
+      appliedDesign: {
+        ...state.appliedDesign,
+        fullBody: clearWrapFromSurface(state.appliedDesign.fullBody),
+        parts: clearFullBodyPartWraps(state.appliedDesign.parts),
       },
       draftSelection: null,
     }

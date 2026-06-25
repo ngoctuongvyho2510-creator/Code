@@ -230,6 +230,14 @@ for (const part of VEHICLE_PARTS) {
   }
 }
 
+export const FULL_BODY_PART_IDS = VEHICLE_PARTS.filter(
+  (part) => part.fullBody && part.selectable && part.services.includes('wrap'),
+).map((part) => part.id)
+
+export const WRAP_CAPABLE_MESH_NAMES = VEHICLE_PARTS.filter(
+  (part) => part.selectable && !part.visualOnly && part.services.includes('wrap'),
+).flatMap((part) => part.meshNames)
+
 export function isVisualOnlyMeshName(meshName: string): boolean {
   return meshName.startsWith('tmp_') || meshName === 'tube01'
 }
