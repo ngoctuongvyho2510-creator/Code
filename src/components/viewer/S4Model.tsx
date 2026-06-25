@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { useGLTF, useTexture } from '@react-three/drei'
 import { useThree } from '@react-three/fiber'
 import {
+  Box3,
   BufferGeometry,
   Color,
   EdgesGeometry,
@@ -9,8 +10,10 @@ import {
   LineSegments,
   Material,
   Mesh,
+  MeshPhysicalMaterial,
   MeshStandardMaterial,
   Object3D,
+  PlaneGeometry,
   Quaternion,
   Raycaster,
   SRGBColorSpace,
@@ -22,10 +25,19 @@ import {
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import {
+  FULL_BODY_MESH_NAMES,
+  FULL_BODY_TARGET_ID,
   getSelectablePartByMeshName,
   getSelectionTarget,
   LICENSE_PLATE_MESH_NAMES,
+  WRAP_CAPABLE_MESH_NAMES,
 } from '../../config/vehicleParts'
+import type {
+  AppliedDesignState,
+  WrapConfig,
+  WrapFinish,
+  WrapPreviewState,
+} from '../../types/configurator'
 
 const MODEL_URL = '/Mahir S4.glb'
 const PLATE_TEXTURE_URL = '/MW Plate.png'
@@ -39,6 +51,15 @@ const HOVER_OUTLINE_COLOR = new Color('#c49d59')
 const SELECTED_OUTLINE_COLOR = new Color('#f1c76d')
 
 type ModelMesh = Mesh<BufferGeometry, Material | Material[], Object3DEventMap>
+
+type PreparedModelScene = {
+  fallbackPlateSurfaceNames: string[]
+  foundWrapCapableMeshNames: Set<string>
+  nativePlateMeshNames: Set<string>
+  originalFactoryMaterialsByMeshUuid: Map<string, Material | Material[]>
+  runtimeFactoryMaterialsByMeshUuid: Map<string, Material | Material[]>
+  scene: Object3D
+}
 
 type ModelInventoryRow = {
   name: string
@@ -61,14 +82,53 @@ type PointerStart = {
 }
 
 type S4ModelProps = {
+  appliedDesign: AppliedDesignState
   controlsRef: RefObject<OrbitControlsImpl | null>
   selectedTargetId: string | null
+  wrapPreview: WrapPreviewState | null
   onPartSelect: (partId: string) => void
   onSelectionClear: () => void
 }
 
 const inspectedScenes = new WeakSet<Object3D>()
+const inspectedWrapMeshScenes = new WeakSet<Object3D>()
 const plateMeshNames = new Set<string>(LICENSE_PLATE_MESH_NAMES)
+const fullBodyMeshNames = new Set<string>(FULL_BODY_MESH_NAMES)
+const wrapCapableMeshNames = new Set<string>(WRAP_CAPABLE_MESH_NAMES)
+const plateMaterialNamePattern = /^LicPlate_/i
+
+const wrapFinishSettings = {
+  gloss: {
+    clearcoat: 0.92,
+    clearcoatRoughness: 0.08,
+    envMapIntensity: 1.35,
+    reflectivity: 0.62,
+    roughness: 0.18,
+  },
+  satin: {
+    clearcoat: 0.48,
+    clearcoatRoughness: 0.28,
+    envMapIntensity: 1.05,
+    reflectivity: 0.48,
+    roughness: 0.45,
+  },
+  matte: {
+    clearcoat: 0.08,
+    clearcoatRoughness: 0.68,
+    envMapIntensity: 0.78,
+    reflectivity: 0.32,
+    roughness: 0.78,
+  },
+} as const satisfies Record<
+  WrapFinish,
+  {
+    clearcoat: number
+    clearcoatRoughness: number
+    envMapIntensity: number
+    reflectivity: number
+    roughness: number
+  }
+>
 
 function isModelMesh(object: Object3D): object is ModelMesh {
   return object instanceof Mesh
@@ -100,6 +160,44 @@ function cloneMaterials(material: Material | Material[]): Material | Material[] 
   return material.clone()
 }
 
+function createRuntimeMaterial(
+  material: Material,
+  wrapCapable: boolean,
+): Material {
+  if (wrapCapable && material instanceof MeshStandardMaterial) {
+    const runtimeMaterial = new MeshPhysicalMaterial()
+
+    if (material instanceof MeshPhysicalMaterial) {
+      runtimeMaterial.copy(material)
+    } else {
+      MeshStandardMaterial.prototype.copy.call(runtimeMaterial, material)
+    }
+
+    runtimeMaterial.name = material.name
+
+    if (!(material instanceof MeshPhysicalMaterial)) {
+      runtimeMaterial.clearcoat = 0
+      runtimeMaterial.clearcoatRoughness = 0
+      runtimeMaterial.reflectivity = 0.5
+    }
+
+    return runtimeMaterial
+  }
+
+  return material.clone()
+}
+
+function createRuntimeMaterials(
+  material: Material | Material[],
+  wrapCapable: boolean,
+): Material | Material[] {
+  if (Array.isArray(material)) {
+    return material.map((item) => createRuntimeMaterial(item, wrapCapable))
+  }
+
+  return createRuntimeMaterial(material, wrapCapable)
+}
+
 function getMaterialNames(material: Material | Material[]): string {
   return getMaterials(material)
     .map((item) => item.name || '(unnamed material)')
@@ -109,6 +207,12 @@ function getMaterialNames(material: Material | Material[]): string {
 function hasTransparentMaterial(material: Material | Material[]): boolean {
   return getMaterials(material).some(
     (item) => item.transparent || item.opacity < 1 || item.alphaTest > 0,
+  )
+}
+
+function hasLicensePlateMaterial(material: Material | Material[]): boolean {
+  return getMaterials(material).some((item) =>
+    plateMaterialNamePattern.test(item.name),
   )
 }
 
@@ -129,6 +233,9 @@ function createPlateMaterial(plateTexture: Texture): MeshStandardMaterial {
     color: '#ffffff',
     map: plateTexture,
     metalness: 0.04,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
     roughness: 0.48,
   })
 
@@ -136,20 +243,158 @@ function createPlateMaterial(plateTexture: Texture): MeshStandardMaterial {
   return material
 }
 
-function prepareModelScene(scene: Object3D, plateTexture: Texture) {
+function createPlateSurface(
+  plateMesh: ModelMesh,
+  plateTexture: Texture,
+  rearPlate: boolean,
+): Mesh<PlaneGeometry, MeshStandardMaterial> | null {
+  plateMesh.geometry.computeBoundingBox()
+  const boundingBox = plateMesh.geometry.boundingBox
+
+  if (!boundingBox) {
+    return null
+  }
+
+  const size = new Vector3()
+  const center = new Vector3()
+
+  boundingBox.getSize(size)
+  boundingBox.getCenter(center)
+
+  if (size.x <= 0 || size.y <= 0) {
+    return null
+  }
+
+  const surface = new Mesh(
+    new PlaneGeometry(size.x, size.y),
+    createPlateMaterial(plateTexture),
+  )
+  const zOffset = size.z / 2 + 0.003
+
+  surface.name = rearPlate
+    ? 'MW_PART_LICENSE_PLATE_REAR_ARTWORK'
+    : 'MW_PART_LICENSE_PLATE_FRONT_ARTWORK'
+  surface.position.set(center.x, center.y, center.z + (rearPlate ? -zOffset : zOffset))
+  surface.rotation.y = rearPlate ? Math.PI : 0
+  surface.renderOrder = 6
+  surface.userData.modifyWrapPlateSurface = true
+  surface.raycast = () => undefined
+
+  return surface
+}
+
+function addRuntimePlateSurfaces(
+  scene: Object3D,
+  plateTexture: Texture,
+): string[] {
+  const plateMeshes: ModelMesh[] = []
+
+  scene.updateMatrixWorld(true)
+  scene.traverse((object) => {
+    if (isModelMesh(object) && hasLicensePlateMaterial(object.material)) {
+      plateMeshes.push(object)
+    }
+  })
+
+  const frontPlateMesh = plateMeshes.find((mesh) =>
+    getPlateCenterZ(mesh) >= 0 && getMaterialNames(mesh.material).includes('white'),
+  )
+  const rearPlateMesh = plateMeshes.find((mesh) =>
+    getPlateCenterZ(mesh) < 0 && getMaterialNames(mesh.material).includes('white'),
+  )
+  const addedSurfaceNames: string[] = []
+
+  for (const [plateMesh, rearPlate] of [
+    [frontPlateMesh, false],
+    [rearPlateMesh, true],
+  ] as const) {
+    if (!plateMesh) {
+      continue
+    }
+
+    const surface = createPlateSurface(plateMesh, plateTexture, rearPlate)
+
+    if (!surface) {
+      continue
+    }
+
+    plateMesh.add(surface)
+    addedSurfaceNames.push(surface.name)
+  }
+
+  return addedSurfaceNames
+}
+
+function getPlateCenterZ(mesh: ModelMesh): number {
+  const boundingBox = new Box3().setFromObject(mesh)
+  const center = new Vector3()
+
+  boundingBox.getCenter(center)
+  return center.z
+}
+
+function prepareModelScene(
+  scene: Object3D,
+  nativePlateTexture: Texture,
+  surfacePlateTexture: Texture,
+): PreparedModelScene {
+  const fallbackPlateSurfaceNames: string[] = []
+  const foundWrapCapableMeshNames = new Set<string>()
+  const nativePlateMeshNames = new Set<string>()
+  const originalFactoryMaterialsByMeshUuid = new Map<
+    string,
+    Material | Material[]
+  >()
+  const runtimeFactoryMaterialsByMeshUuid = new Map<
+    string,
+    Material | Material[]
+  >()
+
   scene.traverse((object) => {
     if (!isModelMesh(object)) {
       return
     }
 
-    if (plateMeshNames.has(object.name)) {
-      object.material = createPlateMaterial(plateTexture)
-    } else {
-      object.material = cloneMaterials(object.material)
+    originalFactoryMaterialsByMeshUuid.set(
+      object.uuid,
+      cloneMaterials(object.material),
+    )
+
+    const wrapCapable = wrapCapableMeshNames.has(object.name)
+
+    if (wrapCapable) {
+      foundWrapCapableMeshNames.add(object.name)
     }
+
+    if (plateMeshNames.has(object.name)) {
+      nativePlateMeshNames.add(object.name)
+      object.material = createPlateMaterial(nativePlateTexture)
+    } else {
+      object.material = createRuntimeMaterials(object.material, wrapCapable)
+    }
+
+    runtimeFactoryMaterialsByMeshUuid.set(
+      object.uuid,
+      cloneMaterials(object.material),
+    )
   })
 
+  if (nativePlateMeshNames.size < plateMeshNames.size) {
+    fallbackPlateSurfaceNames.push(
+      ...addRuntimePlateSurfaces(scene, surfacePlateTexture),
+    )
+  }
+
   applyShadowSettings(scene)
+
+  return {
+    fallbackPlateSurfaceNames,
+    foundWrapCapableMeshNames,
+    nativePlateMeshNames,
+    originalFactoryMaterialsByMeshUuid,
+    runtimeFactoryMaterialsByMeshUuid,
+    scene,
+  }
 }
 
 function disposeMaterial(material: Material | Material[]) {
@@ -254,6 +499,147 @@ function logDevelopmentInventory(scene: Object3D) {
   console.groupCollapsed('Mahir S4 GLB inventory')
   console.table(getInventory(scene))
   console.groupEnd()
+}
+
+function logMissingWrapCapableMeshes(preparedScene: PreparedModelScene) {
+  if (
+    !import.meta.env.DEV ||
+    inspectedWrapMeshScenes.has(preparedScene.scene)
+  ) {
+    return
+  }
+
+  inspectedWrapMeshScenes.add(preparedScene.scene)
+
+  const missingMeshNames = WRAP_CAPABLE_MESH_NAMES.filter(
+    (meshName) => !preparedScene.foundWrapCapableMeshNames.has(meshName),
+  )
+
+  if (missingMeshNames.length === 0) {
+    console.info('All registered wrap-capable meshes were found in Mahir S4.glb.')
+    return
+  }
+
+  console.warn('Registered wrap-capable meshes not found in Mahir S4.glb')
+  console.table(missingMeshNames)
+}
+
+function copyMaterialState(
+  target: Material | Material[],
+  source: Material | Material[],
+) {
+  if (Array.isArray(target) && Array.isArray(source)) {
+    const materialCount = Math.min(target.length, source.length)
+
+    for (let index = 0; index < materialCount; index += 1) {
+      target[index].copy(source[index])
+      target[index].needsUpdate = true
+    }
+
+    return
+  }
+
+  if (!Array.isArray(target) && !Array.isArray(source)) {
+    target.copy(source)
+    target.needsUpdate = true
+  }
+}
+
+function resetMeshMaterialToFactory(
+  mesh: ModelMesh,
+  preparedScene: PreparedModelScene,
+) {
+  const factoryMaterial =
+    preparedScene.runtimeFactoryMaterialsByMeshUuid.get(mesh.uuid)
+
+  if (!factoryMaterial) {
+    return
+  }
+
+  copyMaterialState(mesh.material, factoryMaterial)
+}
+
+function applyWrapToMaterial(material: Material, wrap: WrapConfig) {
+  if (!(material instanceof MeshStandardMaterial)) {
+    return
+  }
+
+  const settings = wrapFinishSettings[wrap.finish]
+
+  material.color.setStyle(wrap.color, SRGBColorSpace)
+  material.map = null
+  material.metalness = 0.02
+  material.roughness = settings.roughness
+  material.envMapIntensity = settings.envMapIntensity
+
+  if (material instanceof MeshPhysicalMaterial) {
+    material.clearcoat = settings.clearcoat
+    material.clearcoatRoughness = settings.clearcoatRoughness
+    material.reflectivity = settings.reflectivity
+  }
+
+  material.needsUpdate = true
+}
+
+function applyWrapToMesh(mesh: ModelMesh, wrap: WrapConfig) {
+  for (const material of getMaterials(mesh.material)) {
+    applyWrapToMaterial(material, wrap)
+  }
+}
+
+function getEffectiveWrapForMesh(
+  meshName: string,
+  appliedDesign: AppliedDesignState,
+  wrapPreview: WrapPreviewState | null,
+): WrapConfig | null {
+  const part = getSelectablePartByMeshName(meshName)
+
+  if (!part?.services.includes('wrap')) {
+    return null
+  }
+
+  const previewAppliesToFullBody = wrapPreview?.targetId === FULL_BODY_TARGET_ID
+  const previewAppliesToPart = wrapPreview?.targetId === part.id
+
+  const partWrap = previewAppliesToPart
+    ? wrapPreview.wrap
+    : (appliedDesign.parts[part.id]?.wrap ?? null)
+
+  if (partWrap) {
+    return partWrap
+  }
+
+  if (!fullBodyMeshNames.has(meshName)) {
+    return null
+  }
+
+  return previewAppliesToFullBody
+    ? wrapPreview.wrap
+    : appliedDesign.fullBody.wrap
+}
+
+function applyWrapMaterials(
+  preparedScene: PreparedModelScene,
+  appliedDesign: AppliedDesignState,
+  wrapPreview: WrapPreviewState | null,
+) {
+  preparedScene.scene.traverse((object) => {
+    if (!isModelMesh(object) || !wrapCapableMeshNames.has(object.name)) {
+      return
+    }
+
+    resetMeshMaterialToFactory(object, preparedScene)
+
+    const wrap = getEffectiveWrapForMesh(
+      object.name,
+      appliedDesign,
+      wrapPreview,
+    )
+
+    if (wrap) {
+      applyWrapToMesh(object, wrap)
+    }
+  })
 }
 
 function resolveSelectablePartId(object: Object3D): string | null {
@@ -375,8 +761,10 @@ function getSelectionThreshold(pointerType: string): number {
 }
 
 export function S4Model({
+  appliedDesign,
   controlsRef,
   selectedTargetId,
+  wrapPreview,
   onPartSelect,
   onSelectionClear,
 }: S4ModelProps) {
@@ -389,7 +777,7 @@ export function S4Model({
   const multiTouchGestureRef = useRef(false)
   const [hoveredPartId, setHoveredPartId] = useState<string | null>(null)
 
-  const preparedPlateTexture = useMemo(() => {
+  const preparedNativePlateTexture = useMemo(() => {
     const texture = plateTexture.clone()
 
     texture.colorSpace = SRGBColorSpace
@@ -399,11 +787,26 @@ export function S4Model({
     return texture
   }, [plateTexture])
 
-  const modelScene = useMemo(() => {
+  const preparedSurfacePlateTexture = useMemo(() => {
+    const texture = plateTexture.clone()
+
+    texture.colorSpace = SRGBColorSpace
+    texture.flipY = true
+    texture.needsUpdate = true
+
+    return texture
+  }, [plateTexture])
+
+  const preparedScene = useMemo(() => {
     const clonedScene = clone(gltf.scene)
-    prepareModelScene(clonedScene, preparedPlateTexture)
-    return clonedScene
-  }, [gltf.scene, preparedPlateTexture])
+    return prepareModelScene(
+      clonedScene,
+      preparedNativePlateTexture,
+      preparedSurfacePlateTexture,
+    )
+  }, [gltf.scene, preparedNativePlateTexture, preparedSurfacePlateTexture])
+
+  const modelScene = preparedScene.scene
 
   const selectedMeshNames = useMemo(
     () => getTargetMeshNames(selectedTargetId),
@@ -423,6 +826,14 @@ export function S4Model({
   useEffect(() => {
     logDevelopmentInventory(gltf.scene)
   }, [gltf.scene])
+
+  useEffect(() => {
+    logMissingWrapCapableMeshes(preparedScene)
+  }, [preparedScene])
+
+  useEffect(() => {
+    applyWrapMaterials(preparedScene, appliedDesign, wrapPreview)
+  }, [appliedDesign, preparedScene, wrapPreview])
 
   useEffect(() => {
     applyOutlines(modelScene, selectedMeshNames, hoveredMeshNames)
