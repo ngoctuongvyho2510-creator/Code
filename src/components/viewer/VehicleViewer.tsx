@@ -22,6 +22,12 @@ export type VehicleViewerHandle = {
   resetView: () => void
 }
 
+type VehicleViewerProps = {
+  selectedTargetId: string | null
+  onPartSelect: (partId: string) => void
+  onScenePointerMissed: () => void
+}
+
 function LoadingOverlay() {
   const { active, progress } = useProgress()
 
@@ -113,9 +119,17 @@ function InitialViewState({ controlsRef, onResetReady }: InitialViewStateProps) 
 
 type ViewerSceneProps = {
   onResetReady: (resetView: () => void) => void
+  onPartSelect: (partId: string) => void
+  onScenePointerMissed: () => void
+  selectedTargetId: string | null
 }
 
-function ViewerScene({ onResetReady }: ViewerSceneProps) {
+function ViewerScene({
+  onPartSelect,
+  onResetReady,
+  onScenePointerMissed,
+  selectedTargetId,
+}: ViewerSceneProps) {
   const controlsRef = useRef<OrbitControlsImpl | null>(null)
 
   return (
@@ -147,17 +161,23 @@ function ViewerScene({ onResetReady }: ViewerSceneProps) {
       <Suspense fallback={null}>
         <Bounds fit clip observe margin={1.18} maxDuration={0.9}>
           <InitialViewState controlsRef={controlsRef} onResetReady={onResetReady} />
-          <S4Model />
+          <S4Model
+            controlsRef={controlsRef}
+            selectedTargetId={selectedTargetId}
+            onPartSelect={onPartSelect}
+            onSelectionClear={onScenePointerMissed}
+          />
         </Bounds>
       </Suspense>
     </>
   )
 }
 
-export const VehicleViewer = forwardRef<VehicleViewerHandle>(function VehicleViewer(
-  _props,
-  ref,
-) {
+export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>(
+  function VehicleViewer(
+    { onPartSelect, onScenePointerMissed, selectedTargetId },
+    ref,
+  ) {
   const resetViewRef = useRef<() => void>(() => undefined)
 
   const handleResetReady = useCallback((resetView: () => void) => {
@@ -192,12 +212,19 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle>(function VehicleVie
           className="vehicle-viewer-canvas"
           dpr={[1, 2]}
           gl={{ antialias: true, powerPreference: 'high-performance' }}
+          onPointerMissed={onScenePointerMissed}
           shadows="percentage"
         >
-          <ViewerScene onResetReady={handleResetReady} />
+          <ViewerScene
+            selectedTargetId={selectedTargetId}
+            onPartSelect={onPartSelect}
+            onScenePointerMissed={onScenePointerMissed}
+            onResetReady={handleResetReady}
+          />
         </Canvas>
       </ViewerErrorBoundary>
       <LoadingOverlay />
     </div>
   )
-})
+  },
+)
