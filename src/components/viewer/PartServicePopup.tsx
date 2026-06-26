@@ -9,6 +9,10 @@ import type {
   ChromeDeleteFinish,
   ChromeDeleteScope,
   ChromeDeleteScopeOption,
+  PowderCoatConfig,
+  PowderCoatFinish,
+  PowderCoatScope,
+  PowderCoatScopeOption,
   ServiceId,
   TintConfig,
   TintScope,
@@ -36,6 +40,12 @@ const caliperPaintFinishOptions = [
   { id: 'matte', label: 'Matte' },
 ] as const satisfies readonly { id: CaliperPaintFinish; label: string }[]
 
+const powderCoatFinishOptions = [
+  { id: 'gloss', label: 'Gloss' },
+  { id: 'satin', label: 'Satin' },
+  { id: 'matte', label: 'Matte' },
+] as const satisfies readonly { id: PowderCoatFinish; label: string }[]
+
 const validHexColorPattern = /^#[0-9A-F]{6}$/
 const partialHexColorPattern = /^#[0-9A-F]{0,6}$/
 const tintShadeOptions = [70, 50, 35, 20, 5] as const
@@ -47,6 +57,9 @@ type PartServicePopupProps = {
   caliperPaintConfig: CaliperPaintConfig | null
   caliperPaintScope: CaliperPaintScope | null
   caliperPaintScopeOptions: readonly CaliperPaintScopeOption[]
+  powderCoatConfig: PowderCoatConfig | null
+  powderCoatScope: PowderCoatScope | null
+  powderCoatScopeOptions: readonly PowderCoatScopeOption[]
   chromeDeleteConfig: ChromeDeleteConfig | null
   chromeDeleteScope: ChromeDeleteScope | null
   chromeDeleteScopeOptions: readonly ChromeDeleteScopeOption[]
@@ -58,6 +71,7 @@ type PartServicePopupProps = {
   canResetAllWraps: boolean
   canResetCaliperPaint: boolean
   canResetChromeDelete: boolean
+  canResetPowderCoat: boolean
   canResetTint: boolean
   canResetWrap: boolean
   onApply: () => void
@@ -68,11 +82,14 @@ type PartServicePopupProps = {
   onResetAllWraps: () => void
   onResetCaliperPaint: () => void
   onResetChromeDelete: () => void
+  onResetPowderCoat: () => void
   onResetTint: () => void
   onResetWrap: () => void
   onSelectService: (serviceId: ServiceId) => void
   onUpdateCaliperPaintDraft: (patch: Partial<CaliperPaintConfig>) => void
   onUpdateCaliperPaintScope: (scope: CaliperPaintScope) => void
+  onUpdatePowderCoatDraft: (patch: Partial<PowderCoatConfig>) => void
+  onUpdatePowderCoatScope: (scope: PowderCoatScope) => void
   onUpdateChromeDeleteDraft: (patch: Partial<ChromeDeleteConfig>) => void
   onUpdateChromeDeleteScope: (scope: ChromeDeleteScope) => void
   onUpdateTintDraft: (patch: Partial<TintConfig>) => void
@@ -85,11 +102,15 @@ export function PartServicePopup({
   canResetAllWraps,
   canResetCaliperPaint,
   canResetChromeDelete,
+  canResetPowderCoat,
   canResetTint,
   canResetWrap,
   caliperPaintConfig,
   caliperPaintScope,
   caliperPaintScopeOptions,
+  powderCoatConfig,
+  powderCoatScope,
+  powderCoatScopeOptions,
   chromeDeleteConfig,
   chromeDeleteScope,
   chromeDeleteScopeOptions,
@@ -107,11 +128,14 @@ export function PartServicePopup({
   onResetAllWraps,
   onResetCaliperPaint,
   onResetChromeDelete,
+  onResetPowderCoat,
   onResetTint,
   onResetWrap,
   onSelectService,
   onUpdateCaliperPaintDraft,
   onUpdateCaliperPaintScope,
+  onUpdatePowderCoatDraft,
+  onUpdatePowderCoatScope,
   onUpdateChromeDeleteDraft,
   onUpdateChromeDeleteScope,
   onUpdateTintDraft,
@@ -129,16 +153,23 @@ export function PartServicePopup({
     selectedServiceId === 'caliper-paint' &&
     caliperPaintConfig !== null &&
     caliperPaintScope !== null
+  const showPowderCoatEditor =
+    selectedServiceId === 'powder-coat' &&
+    powderCoatConfig !== null &&
+    powderCoatScope !== null
   const showServiceList =
     !showWrapEditor &&
     !showTintEditor &&
     !showChromeDeleteEditor &&
-    !showCaliperPaintEditor
+    !showCaliperPaintEditor &&
+    !showPowderCoatEditor
   const syncedHexValue = wrapConfig?.color.toUpperCase() ?? '#C49D59'
   const syncedChromeDeleteHexValue =
     chromeDeleteConfig?.color.toUpperCase() ?? '#050505'
   const syncedCaliperPaintHexValue =
     caliperPaintConfig?.color.toUpperCase() ?? '#D51F28'
+  const syncedPowderCoatHexValue =
+    powderCoatConfig?.color.toUpperCase() ?? '#2D3135'
   const [hexInput, setHexInput] = useState<{
     source: string
     value: string
@@ -148,6 +179,10 @@ export function PartServicePopup({
     value: string
   } | null>(null)
   const [caliperPaintHexInput, setCaliperPaintHexInput] = useState<{
+    source: string
+    value: string
+  } | null>(null)
+  const [powderCoatHexInput, setPowderCoatHexInput] = useState<{
     source: string
     value: string
   } | null>(null)
@@ -161,6 +196,10 @@ export function PartServicePopup({
     caliperPaintHexInput?.source === syncedCaliperPaintHexValue
       ? caliperPaintHexInput.value
       : syncedCaliperPaintHexValue
+  const powderCoatHexValue =
+    powderCoatHexInput?.source === syncedPowderCoatHexValue
+      ? powderCoatHexInput.value
+      : syncedPowderCoatHexValue
   const [customTint, setCustomTint] = useState<{
     active: boolean
     source: number
@@ -259,6 +298,37 @@ export function PartServicePopup({
 
   function handleCaliperPaintHexBlur() {
     setCaliperPaintHexInput(null)
+  }
+
+  function handlePowderCoatColorChange(color: string) {
+    const normalizedColor = color.toUpperCase()
+
+    setPowderCoatHexInput(null)
+    onUpdatePowderCoatDraft({ color: normalizedColor.toLowerCase() })
+  }
+
+  function handlePowderCoatHexChange(value: string) {
+    const nextValue = value.trim().toUpperCase()
+    const prefixedValue = nextValue.startsWith('#')
+      ? nextValue
+      : `#${nextValue}`
+
+    if (!partialHexColorPattern.test(prefixedValue)) {
+      return
+    }
+
+    setPowderCoatHexInput({
+      source: syncedPowderCoatHexValue,
+      value: prefixedValue,
+    })
+
+    if (validHexColorPattern.test(prefixedValue)) {
+      onUpdatePowderCoatDraft({ color: prefixedValue.toLowerCase() })
+    }
+  }
+
+  function handlePowderCoatHexBlur() {
+    setPowderCoatHexInput(null)
   }
 
   function handleTintShadeSelect(vlt: number) {
@@ -549,6 +619,73 @@ export function PartServicePopup({
         </div>
       ) : null}
 
+      {showPowderCoatEditor && powderCoatConfig && powderCoatScope ? (
+        <div className="part-popup-wrap" aria-label="Powder Coat options">
+          <label className="part-popup-field">
+            <span>Color</span>
+            <div className="part-popup-color-row">
+              <input
+                type="color"
+                className="part-popup-color-input"
+                value={powderCoatConfig.color}
+                onChange={(event) =>
+                  handlePowderCoatColorChange(event.currentTarget.value)
+                }
+              />
+              <input
+                type="text"
+                className="part-popup-hex-input"
+                aria-label="Hex color"
+                inputMode="text"
+                maxLength={7}
+                spellCheck={false}
+                value={powderCoatHexValue}
+                onBlur={handlePowderCoatHexBlur}
+                onChange={(event) =>
+                  handlePowderCoatHexChange(event.currentTarget.value)
+                }
+              />
+            </div>
+          </label>
+
+          <div>
+            <p className="part-popup-finish-label">Finish</p>
+            <div className="part-popup-finish-grid" aria-label="Finish">
+              {powderCoatFinishOptions.map((finish) => (
+                <button
+                  type="button"
+                  className="part-popup-finish"
+                  data-selected={powderCoatConfig.finish === finish.id}
+                  key={finish.id}
+                  onClick={() =>
+                    onUpdatePowderCoatDraft({ finish: finish.id })
+                  }
+                >
+                  {finish.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <p className="part-popup-finish-label">Apply To</p>
+            <div className="part-popup-finish-grid" aria-label="Apply To">
+              {powderCoatScopeOptions.map((scope) => (
+                <button
+                  type="button"
+                  className="part-popup-finish"
+                  data-selected={powderCoatScope === scope.id}
+                  key={scope.id}
+                  onClick={() => onUpdatePowderCoatScope(scope.id)}
+                >
+                  {scope.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {showServiceList ? (
         <div className="part-popup-services" aria-label="Services">
           {target.services.map((serviceId) => {
@@ -663,6 +800,27 @@ export function PartServicePopup({
               type="button"
               className="part-popup-link"
               onClick={onResetCaliperPaint}
+            >
+              Reset
+            </button>
+          ) : null}
+          <button type="button" className="part-popup-apply" onClick={onApply}>
+            Apply
+          </button>
+        </div>
+      ) : showPowderCoatEditor ? (
+        <div className="part-popup-actions part-popup-actions--wrap">
+          <button type="button" className="part-popup-link" onClick={onBack}>
+            Back
+          </button>
+          <button type="button" className="part-popup-link" onClick={onCancel}>
+            Cancel
+          </button>
+          {canResetPowderCoat ? (
+            <button
+              type="button"
+              className="part-popup-link"
+              onClick={onResetPowderCoat}
             >
               Reset
             </button>

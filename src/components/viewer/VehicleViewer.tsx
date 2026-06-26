@@ -16,6 +16,7 @@ import type {
   AppliedDesignState,
   CaliperPaintPreviewState,
   ChromeDeletePreviewState,
+  PowderCoatPreviewState,
   TintPreviewState,
   WrapPreviewState,
 } from '../../types/configurator'
@@ -33,6 +34,7 @@ type VehicleViewerProps = {
   appliedDesign: AppliedDesignState
   caliperPaintPreview: CaliperPaintPreviewState | null
   chromeDeletePreview: ChromeDeletePreviewState | null
+  powderCoatPreview: PowderCoatPreviewState | null
   selectedTargetId: string | null
   tintPreview: TintPreviewState | null
   wrapPreview: WrapPreviewState | null
@@ -133,6 +135,7 @@ type ViewerSceneProps = {
   appliedDesign: AppliedDesignState
   caliperPaintPreview: CaliperPaintPreviewState | null
   chromeDeletePreview: ChromeDeletePreviewState | null
+  powderCoatPreview: PowderCoatPreviewState | null
   onResetReady: (resetView: () => void) => void
   onPartSelect: (partId: string) => void
   onScenePointerMissed: () => void
@@ -145,6 +148,7 @@ function ViewerScene({
   appliedDesign,
   caliperPaintPreview,
   chromeDeletePreview,
+  powderCoatPreview,
   onPartSelect,
   onResetReady,
   onScenePointerMissed,
@@ -188,6 +192,7 @@ function ViewerScene({
             caliperPaintPreview={caliperPaintPreview}
             chromeDeletePreview={chromeDeletePreview}
             controlsRef={controlsRef}
+            powderCoatPreview={powderCoatPreview}
             selectedTargetId={selectedTargetId}
             tintPreview={tintPreview}
             wrapPreview={wrapPreview}
@@ -206,6 +211,7 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
       appliedDesign,
       caliperPaintPreview,
       chromeDeletePreview,
+      powderCoatPreview,
       onPartSelect,
       onScenePointerMissed,
       selectedTargetId,
@@ -254,6 +260,7 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
             appliedDesign={appliedDesign}
             caliperPaintPreview={caliperPaintPreview}
             chromeDeletePreview={chromeDeletePreview}
+            powderCoatPreview={powderCoatPreview}
             selectedTargetId={selectedTargetId}
             tintPreview={tintPreview}
             wrapPreview={wrapPreview}
