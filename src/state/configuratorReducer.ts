@@ -1,14 +1,19 @@
 import {
   FULL_BODY_PART_IDS,
   FULL_BODY_TARGET_ID,
+  getDefaultCaliperPaintScope,
   getDefaultChromeDeleteScope,
   getDefaultTintScope,
   getSelectionTarget,
+  resolveCaliperPaintScopeTargetIds,
   resolveChromeDeleteScopeTargetIds,
   resolveTintScopeTargetIds,
 } from '../config/vehicleParts'
 import type {
   AppliedDesignState,
+  CaliperPaintConfig,
+  CaliperPaintFinish,
+  CaliperPaintScope,
   ChromeDeleteConfig,
   ChromeDeleteFinish,
   ChromeDeleteScope,
@@ -33,6 +38,11 @@ const DEFAULT_TINT_CONFIG: TintConfig = {
 
 const DEFAULT_CHROME_DELETE_CONFIG: ChromeDeleteConfig = {
   color: '#050505',
+  finish: 'gloss',
+}
+
+const DEFAULT_CALIPER_PAINT_CONFIG: CaliperPaintConfig = {
+  color: '#d51f28',
   finish: 'gloss',
 }
 
@@ -71,6 +81,14 @@ export type ConfiguratorAction =
       scope: ChromeDeleteScope
     }
   | {
+      type: 'update-caliper-paint-draft'
+      patch: Partial<CaliperPaintConfig>
+    }
+  | {
+      type: 'update-caliper-paint-scope'
+      scope: CaliperPaintScope
+    }
+  | {
       type: 'clear-service'
     }
   | {
@@ -97,6 +115,11 @@ export type ConfiguratorAction =
       scope: ChromeDeleteScope
     }
   | {
+      type: 'reset-caliper-paint'
+      targetId: SelectionTargetId
+      scope: CaliperPaintScope
+    }
+  | {
       type: 'reset-all-wraps'
     }
 
@@ -105,6 +128,7 @@ function createLayeredSurfaceState(): LayeredSurfaceState {
     wrap: null,
     tint: null,
     chromeDelete: null,
+    caliperPaint: null,
     artwork: null,
     ppf: null,
     ceramic: null,
@@ -136,6 +160,13 @@ function applyServiceToSurface(
     return {
       ...surfaceState,
       chromeDelete: DEFAULT_CHROME_DELETE_CONFIG,
+    }
+  }
+
+  if (serviceId === 'caliper-paint') {
+    return {
+      ...surfaceState,
+      caliperPaint: DEFAULT_CALIPER_PAINT_CONFIG,
     }
   }
 
@@ -226,6 +257,25 @@ function clearChromeDeleteFromSurface(
   }
 }
 
+function setCaliperPaintOnSurface(
+  surfaceState: LayeredSurfaceState,
+  caliperPaintConfig: CaliperPaintConfig,
+): LayeredSurfaceState {
+  return {
+    ...surfaceState,
+    caliperPaint: caliperPaintConfig,
+  }
+}
+
+function clearCaliperPaintFromSurface(
+  surfaceState: LayeredSurfaceState,
+): LayeredSurfaceState {
+  return {
+    ...surfaceState,
+    caliperPaint: null,
+  }
+}
+
 function getAppliedWrapForTarget(
   appliedDesign: AppliedDesignState,
   targetId: SelectionTargetId,
@@ -286,6 +336,23 @@ function createChromeDeleteDraft(
   )
 }
 
+function getAppliedCaliperPaintForTarget(
+  appliedDesign: AppliedDesignState,
+  targetId: SelectionTargetId,
+): CaliperPaintConfig | null {
+  return appliedDesign.parts[targetId]?.caliperPaint ?? null
+}
+
+function createCaliperPaintDraft(
+  appliedDesign: AppliedDesignState,
+  targetId: SelectionTargetId,
+): CaliperPaintConfig {
+  return (
+    getAppliedCaliperPaintForTarget(appliedDesign, targetId) ??
+    DEFAULT_CALIPER_PAINT_CONFIG
+  )
+}
+
 function updateWrapDraft(
   currentWrap: WrapConfig,
   patch: Partial<WrapConfig>,
@@ -323,6 +390,20 @@ function updateChromeDeleteDraft(
   }
 }
 
+function updateCaliperPaintDraft(
+  currentCaliperPaint: CaliperPaintConfig,
+  patch: Partial<CaliperPaintConfig>,
+): CaliperPaintConfig {
+  const finish = patch.finish
+
+  return {
+    color: patch.color ?? currentCaliperPaint.color,
+    finish: isCaliperPaintFinish(finish)
+      ? finish
+      : currentCaliperPaint.finish,
+  }
+}
+
 function isWrapFinish(finish: WrapFinish | undefined): finish is WrapFinish {
   return finish === 'gloss' || finish === 'satin' || finish === 'matte'
 }
@@ -330,6 +411,12 @@ function isWrapFinish(finish: WrapFinish | undefined): finish is WrapFinish {
 function isChromeDeleteFinish(
   finish: ChromeDeleteFinish | undefined,
 ): finish is ChromeDeleteFinish {
+  return finish === 'gloss' || finish === 'satin' || finish === 'matte'
+}
+
+function isCaliperPaintFinish(
+  finish: CaliperPaintFinish | undefined,
+): finish is CaliperPaintFinish {
   return finish === 'gloss' || finish === 'satin' || finish === 'matte'
 }
 
@@ -429,6 +516,44 @@ function clearChromeDeleteForTargetIds(
   return nextParts
 }
 
+function setCaliperPaintForTargetIds(
+  parts: AppliedDesignState['parts'],
+  targetIds: readonly SelectionTargetId[],
+  caliperPaintConfig: CaliperPaintConfig,
+): AppliedDesignState['parts'] {
+  const nextParts: AppliedDesignState['parts'] = {
+    ...parts,
+  }
+
+  for (const targetId of targetIds) {
+    const currentPartState = nextParts[targetId] ?? createLayeredSurfaceState()
+
+    nextParts[targetId] = setCaliperPaintOnSurface(
+      currentPartState,
+      caliperPaintConfig,
+    )
+  }
+
+  return nextParts
+}
+
+function clearCaliperPaintForTargetIds(
+  parts: AppliedDesignState['parts'],
+  targetIds: readonly SelectionTargetId[],
+): AppliedDesignState['parts'] {
+  const nextParts: AppliedDesignState['parts'] = {
+    ...parts,
+  }
+
+  for (const targetId of targetIds) {
+    const currentPartState = nextParts[targetId] ?? createLayeredSurfaceState()
+
+    nextParts[targetId] = clearCaliperPaintFromSurface(currentPartState)
+  }
+
+  return nextParts
+}
+
 export const initialConfiguratorState: ConfiguratorState = {
   appliedDesign: {
     fullBody: createLayeredSurfaceState(),
@@ -458,6 +583,8 @@ export function configuratorReducer(
         tintScope: null,
         chromeDeleteConfig: null,
         chromeDeleteScope: null,
+        caliperPaintConfig: null,
+        caliperPaintScope: null,
       },
     }
   }
@@ -490,6 +617,17 @@ export function configuratorReducer(
             state.draftSelection.targetId,
           )
         : null
+    const defaultCaliperPaintScope =
+      action.serviceId === 'caliper-paint'
+        ? getDefaultCaliperPaintScope(state.draftSelection.targetId)
+        : null
+    const caliperPaintConfig =
+      action.serviceId === 'caliper-paint' && defaultCaliperPaintScope
+        ? createCaliperPaintDraft(
+            state.appliedDesign,
+            state.draftSelection.targetId,
+          )
+        : null
 
     return {
       ...state,
@@ -501,6 +639,8 @@ export function configuratorReducer(
         tintScope: defaultTintScope,
         chromeDeleteConfig,
         chromeDeleteScope: defaultChromeDeleteScope,
+        caliperPaintConfig,
+        caliperPaintScope: defaultCaliperPaintScope,
       },
     }
   }
@@ -618,6 +758,54 @@ export function configuratorReducer(
     }
   }
 
+  if (action.type === 'update-caliper-paint-draft') {
+    const draftSelection = state.draftSelection
+
+    if (draftSelection?.serviceId !== 'caliper-paint') {
+      return state
+    }
+
+    const currentCaliperPaint =
+      draftSelection.caliperPaintConfig ??
+      createCaliperPaintDraft(state.appliedDesign, draftSelection.targetId)
+
+    return {
+      ...state,
+      draftSelection: {
+        ...draftSelection,
+        caliperPaintConfig: updateCaliperPaintDraft(
+          currentCaliperPaint,
+          action.patch,
+        ),
+      },
+    }
+  }
+
+  if (action.type === 'update-caliper-paint-scope') {
+    const draftSelection = state.draftSelection
+
+    if (draftSelection?.serviceId !== 'caliper-paint') {
+      return state
+    }
+
+    if (
+      resolveCaliperPaintScopeTargetIds(
+        draftSelection.targetId,
+        action.scope,
+      ).length === 0
+    ) {
+      return state
+    }
+
+    return {
+      ...state,
+      draftSelection: {
+        ...draftSelection,
+        caliperPaintScope: action.scope,
+      },
+    }
+  }
+
   if (action.type === 'clear-service') {
     if (!state.draftSelection) {
       return state
@@ -633,6 +821,8 @@ export function configuratorReducer(
         tintScope: null,
         chromeDeleteConfig: null,
         chromeDeleteScope: null,
+        caliperPaintConfig: null,
+        caliperPaintScope: null,
       },
     }
   }
@@ -743,6 +933,34 @@ export function configuratorReducer(
             state.appliedDesign.parts,
             chromeDeleteTargetIds,
             draftSelection.chromeDeleteConfig,
+          ),
+        },
+        draftSelection: null,
+      }
+    }
+
+    if (draftSelection.serviceId === 'caliper-paint') {
+      if (!draftSelection.caliperPaintConfig || !draftSelection.caliperPaintScope) {
+        return state
+      }
+
+      const caliperPaintTargetIds = resolveCaliperPaintScopeTargetIds(
+        draftSelection.targetId,
+        draftSelection.caliperPaintScope,
+      )
+
+      if (caliperPaintTargetIds.length === 0) {
+        return state
+      }
+
+      return {
+        ...state,
+        appliedDesign: {
+          ...state.appliedDesign,
+          parts: setCaliperPaintForTargetIds(
+            state.appliedDesign.parts,
+            caliperPaintTargetIds,
+            draftSelection.caliperPaintConfig,
           ),
         },
         draftSelection: null,
@@ -873,6 +1091,29 @@ export function configuratorReducer(
         parts: clearChromeDeleteForTargetIds(
           state.appliedDesign.parts,
           chromeDeleteTargetIds,
+        ),
+      },
+      draftSelection: null,
+    }
+  }
+
+  if (action.type === 'reset-caliper-paint') {
+    const caliperPaintTargetIds = resolveCaliperPaintScopeTargetIds(
+      action.targetId,
+      action.scope,
+    )
+
+    if (caliperPaintTargetIds.length === 0) {
+      return state
+    }
+
+    return {
+      ...state,
+      appliedDesign: {
+        ...state.appliedDesign,
+        parts: clearCaliperPaintForTargetIds(
+          state.appliedDesign.parts,
+          caliperPaintTargetIds,
         ),
       },
       draftSelection: null,

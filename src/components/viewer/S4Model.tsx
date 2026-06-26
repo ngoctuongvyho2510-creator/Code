@@ -26,6 +26,7 @@ import {
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import {
+  CALIPER_PAINT_MESH_NAMES,
   CHROME_DELETE_MESH_NAMES,
   FULL_BODY_MESH_NAMES,
   FULL_BODY_TARGET_ID,
@@ -37,6 +38,9 @@ import {
 } from '../../config/vehicleParts'
 import type {
   AppliedDesignState,
+  CaliperPaintConfig,
+  CaliperPaintFinish,
+  CaliperPaintPreviewState,
   ChromeDeleteConfig,
   ChromeDeleteFinish,
   ChromeDeletePreviewState,
@@ -63,6 +67,7 @@ type ModelMesh = Mesh<BufferGeometry, Material | Material[], Object3DEventMap>
 
 type PreparedModelScene = {
   fallbackPlateSurfaceNames: string[]
+  foundCaliperPaintMeshNames: Set<string>
   foundChromeDeleteMeshNames: Set<string>
   foundTintableMeshNames: Set<string>
   foundWrapCapableMeshNames: Set<string>
@@ -94,6 +99,7 @@ type PointerStart = {
 
 type S4ModelProps = {
   appliedDesign: AppliedDesignState
+  caliperPaintPreview: CaliperPaintPreviewState | null
   controlsRef: RefObject<OrbitControlsImpl | null>
   chromeDeletePreview: ChromeDeletePreviewState | null
   selectedTargetId: string | null
@@ -104,10 +110,12 @@ type S4ModelProps = {
 }
 
 const inspectedScenes = new WeakSet<Object3D>()
+const inspectedCaliperPaintMeshScenes = new WeakSet<Object3D>()
 const inspectedChromeDeleteMeshScenes = new WeakSet<Object3D>()
 const inspectedTintableMeshScenes = new WeakSet<Object3D>()
 const inspectedWrapMeshScenes = new WeakSet<Object3D>()
 const plateMeshNames = new Set<string>(LICENSE_PLATE_MESH_NAMES)
+const caliperPaintMeshNames = new Set<string>(CALIPER_PAINT_MESH_NAMES)
 const chromeDeleteMeshNames = new Set<string>(CHROME_DELETE_MESH_NAMES)
 const tintableMeshNames = new Set<string>(TINTABLE_GLASS_MESH_NAMES)
 const fullBodyMeshNames = new Set<string>(FULL_BODY_MESH_NAMES)
@@ -229,6 +237,39 @@ const chromeDeleteFinishSettings = {
   },
 } as const satisfies Record<
   ChromeDeleteFinish,
+  {
+    clearcoat: number
+    clearcoatRoughness: number
+    envMapIntensity: number
+    reflectivity: number
+    roughness: number
+  }
+>
+
+const caliperPaintFinishSettings = {
+  gloss: {
+    clearcoat: 0.86,
+    clearcoatRoughness: 0.08,
+    envMapIntensity: 1.18,
+    reflectivity: 0.54,
+    roughness: 0.18,
+  },
+  satin: {
+    clearcoat: 0.34,
+    clearcoatRoughness: 0.32,
+    envMapIntensity: 0.92,
+    reflectivity: 0.36,
+    roughness: 0.44,
+  },
+  matte: {
+    clearcoat: 0.04,
+    clearcoatRoughness: 0.72,
+    envMapIntensity: 0.72,
+    reflectivity: 0.22,
+    roughness: 0.78,
+  },
+} as const satisfies Record<
+  CaliperPaintFinish,
   {
     clearcoat: number
     clearcoatRoughness: number
@@ -395,6 +436,7 @@ function createRuntimeMaterial(
   wrapCapable: boolean,
   tintCapable: boolean,
   chromeDeleteCapable: boolean,
+  caliperPaintCapable: boolean,
   cleanFactoryChromeSideWindowTrim: boolean,
   cleanBlackExteriorTrim: boolean,
 ): Material {
@@ -414,7 +456,7 @@ function createRuntimeMaterial(
   }
 
   if (
-    (wrapCapable || tintCapable || chromeDeleteCapable) &&
+    (wrapCapable || tintCapable || chromeDeleteCapable || caliperPaintCapable) &&
     material instanceof MeshStandardMaterial
   ) {
     const runtimeMaterial = new MeshPhysicalMaterial()
@@ -444,6 +486,7 @@ function createRuntimeMaterials(
   wrapCapable: boolean,
   tintCapable: boolean,
   chromeDeleteCapable: boolean,
+  caliperPaintCapable: boolean,
   cleanFactoryChromeSideWindowTrim: boolean,
   cleanBlackExteriorTrim: boolean,
 ): Material | Material[] {
@@ -454,6 +497,7 @@ function createRuntimeMaterials(
         wrapCapable,
         tintCapable,
         chromeDeleteCapable,
+        caliperPaintCapable,
         cleanFactoryChromeSideWindowTrim,
         cleanBlackExteriorTrim,
       ),
@@ -465,6 +509,7 @@ function createRuntimeMaterials(
     wrapCapable,
     tintCapable,
     chromeDeleteCapable,
+    caliperPaintCapable,
     cleanFactoryChromeSideWindowTrim,
     cleanBlackExteriorTrim,
   )
@@ -611,6 +656,7 @@ function prepareModelScene(
   surfacePlateTexture: Texture,
 ): PreparedModelScene {
   const fallbackPlateSurfaceNames: string[] = []
+  const foundCaliperPaintMeshNames = new Set<string>()
   const foundChromeDeleteMeshNames = new Set<string>()
   const foundTintableMeshNames = new Set<string>()
   const foundWrapCapableMeshNames = new Set<string>()
@@ -637,6 +683,7 @@ function prepareModelScene(
     const wrapCapable = wrapCapableMeshNames.has(object.name)
     const tintCapable = tintableMeshNames.has(object.name)
     const chromeDeleteCapable = chromeDeleteMeshNames.has(object.name)
+    const caliperPaintCapable = caliperPaintMeshNames.has(object.name)
     const cleanFactoryChromeSideWindowTrim =
       factoryChromeSideWindowTrimMeshNames.has(object.name)
     const cleanBlackExteriorTrim = cleanBlackExteriorTrimMeshNames.has(
@@ -649,6 +696,10 @@ function prepareModelScene(
 
     if (chromeDeleteCapable) {
       foundChromeDeleteMeshNames.add(object.name)
+    }
+
+    if (caliperPaintCapable) {
+      foundCaliperPaintMeshNames.add(object.name)
     }
 
     if (tintCapable) {
@@ -664,6 +715,7 @@ function prepareModelScene(
         wrapCapable,
         tintCapable,
         chromeDeleteCapable,
+        caliperPaintCapable,
         cleanFactoryChromeSideWindowTrim,
         cleanBlackExteriorTrim,
       )
@@ -685,6 +737,7 @@ function prepareModelScene(
 
   return {
     fallbackPlateSurfaceNames,
+    foundCaliperPaintMeshNames,
     foundChromeDeleteMeshNames,
     foundTintableMeshNames,
     foundWrapCapableMeshNames,
@@ -865,6 +918,29 @@ function logMissingChromeDeleteMeshes(preparedScene: PreparedModelScene) {
   }
 
   console.warn('Registered chrome-delete meshes not found in Mahir S4.glb')
+  console.table(missingMeshNames)
+}
+
+function logMissingCaliperPaintMeshes(preparedScene: PreparedModelScene) {
+  if (
+    !import.meta.env.DEV ||
+    inspectedCaliperPaintMeshScenes.has(preparedScene.scene)
+  ) {
+    return
+  }
+
+  inspectedCaliperPaintMeshScenes.add(preparedScene.scene)
+
+  const missingMeshNames = CALIPER_PAINT_MESH_NAMES.filter(
+    (meshName) => !preparedScene.foundCaliperPaintMeshNames.has(meshName),
+  )
+
+  if (missingMeshNames.length === 0) {
+    console.info('All registered caliper-paint meshes were found in Mahir S4.glb.')
+    return
+  }
+
+  console.warn('Registered caliper-paint meshes not found in Mahir S4.glb')
   console.table(missingMeshNames)
 }
 
@@ -1193,6 +1269,96 @@ function applyChromeDeleteMaterials(
   })
 }
 
+function applyCaliperPaintToMaterial(
+  material: Material,
+  caliperPaint: CaliperPaintConfig,
+) {
+  if (!(material instanceof MeshStandardMaterial)) {
+    return
+  }
+
+  const settings = caliperPaintFinishSettings[caliperPaint.finish]
+
+  clearStandardMaterialTextureInputs(material)
+  applySmoothOpaqueSurfaceDefaults(material)
+
+  material.color.setStyle(caliperPaint.color, SRGBColorSpace)
+  material.emissive.set(0, 0, 0)
+  material.emissiveIntensity = 0
+  material.metalness = 0
+  material.roughness = settings.roughness
+  material.envMapIntensity = settings.envMapIntensity
+
+  if (material instanceof MeshPhysicalMaterial) {
+    material.clearcoat = settings.clearcoat
+    material.clearcoatRoughness = settings.clearcoatRoughness
+    material.reflectivity = settings.reflectivity
+    material.transmission = 0
+    material.thickness = 0
+  }
+
+  material.needsUpdate = true
+}
+
+function applyCaliperPaintToMesh(
+  mesh: ModelMesh,
+  caliperPaint: CaliperPaintConfig,
+) {
+  for (const material of getMaterials(mesh.material)) {
+    applyCaliperPaintToMaterial(material, caliperPaint)
+  }
+}
+
+function getEffectiveCaliperPaintForMesh(
+  meshName: string,
+  appliedDesign: AppliedDesignState,
+  caliperPaintPreview: CaliperPaintPreviewState | null,
+  previewTargetIds: Set<string>,
+): CaliperPaintConfig | null {
+  if (!caliperPaintMeshNames.has(meshName)) {
+    return null
+  }
+
+  const part = getSelectablePartByMeshName(meshName)
+
+  if (!part?.services.includes('caliper-paint')) {
+    return null
+  }
+
+  if (caliperPaintPreview && previewTargetIds.has(part.id)) {
+    return caliperPaintPreview.caliperPaint
+  }
+
+  return appliedDesign.parts[part.id]?.caliperPaint ?? null
+}
+
+function applyCaliperPaintMaterials(
+  preparedScene: PreparedModelScene,
+  appliedDesign: AppliedDesignState,
+  caliperPaintPreview: CaliperPaintPreviewState | null,
+) {
+  const previewTargetIds = new Set(caliperPaintPreview?.targetIds ?? [])
+
+  preparedScene.scene.traverse((object) => {
+    if (!isModelMesh(object) || !caliperPaintMeshNames.has(object.name)) {
+      return
+    }
+
+    resetMeshMaterialToFactory(object, preparedScene)
+
+    const caliperPaint = getEffectiveCaliperPaintForMesh(
+      object.name,
+      appliedDesign,
+      caliperPaintPreview,
+      previewTargetIds,
+    )
+
+    if (caliperPaint) {
+      applyCaliperPaintToMesh(object, caliperPaint)
+    }
+  })
+}
+
 function resolveSelectablePart(object: Object3D): VehiclePartDefinition | null {
   let current: Object3D | null = object
 
@@ -1254,7 +1420,10 @@ function getPartIdFromPointer(
 
     firstPart ??= part
 
-    if (part.services.includes('chrome-delete')) {
+    if (
+      part.services.includes('chrome-delete') ||
+      part.services.includes('caliper-paint')
+    ) {
       return part.id
     }
   }
@@ -1324,6 +1493,7 @@ function getSelectionThreshold(pointerType: string): number {
 
 export function S4Model({
   appliedDesign,
+  caliperPaintPreview,
   chromeDeletePreview,
   controlsRef,
   selectedTargetId,
@@ -1404,6 +1574,10 @@ export function S4Model({
   }, [preparedScene])
 
   useEffect(() => {
+    logMissingCaliperPaintMeshes(preparedScene)
+  }, [preparedScene])
+
+  useEffect(() => {
     applyWrapMaterials(preparedScene, appliedDesign, wrapPreview)
   }, [appliedDesign, preparedScene, wrapPreview])
 
@@ -1418,6 +1592,14 @@ export function S4Model({
       chromeDeletePreview,
     )
   }, [appliedDesign, chromeDeletePreview, preparedScene])
+
+  useEffect(() => {
+    applyCaliperPaintMaterials(
+      preparedScene,
+      appliedDesign,
+      caliperPaintPreview,
+    )
+  }, [appliedDesign, caliperPaintPreview, preparedScene])
 
   useEffect(() => {
     applyOutlines(modelScene, selectedMeshNames, hoveredMeshNames)

@@ -1,6 +1,10 @@
 import { useState } from 'react'
 import { getService } from '../../config/services'
 import type {
+  CaliperPaintConfig,
+  CaliperPaintFinish,
+  CaliperPaintScope,
+  CaliperPaintScopeOption,
   ChromeDeleteConfig,
   ChromeDeleteFinish,
   ChromeDeleteScope,
@@ -26,6 +30,12 @@ const chromeDeleteFinishOptions = [
   { id: 'matte', label: 'Matte' },
 ] as const satisfies readonly { id: ChromeDeleteFinish; label: string }[]
 
+const caliperPaintFinishOptions = [
+  { id: 'gloss', label: 'Gloss' },
+  { id: 'satin', label: 'Satin' },
+  { id: 'matte', label: 'Matte' },
+] as const satisfies readonly { id: CaliperPaintFinish; label: string }[]
+
 const validHexColorPattern = /^#[0-9A-F]{6}$/
 const partialHexColorPattern = /^#[0-9A-F]{0,6}$/
 const tintShadeOptions = [70, 50, 35, 20, 5] as const
@@ -34,6 +44,9 @@ const tintShadeOptionSet = new Set<number>(tintShadeOptions)
 type PartServicePopupProps = {
   target: VehiclePartDefinition
   selectedServiceId: ServiceId | null
+  caliperPaintConfig: CaliperPaintConfig | null
+  caliperPaintScope: CaliperPaintScope | null
+  caliperPaintScopeOptions: readonly CaliperPaintScopeOption[]
   chromeDeleteConfig: ChromeDeleteConfig | null
   chromeDeleteScope: ChromeDeleteScope | null
   chromeDeleteScopeOptions: readonly ChromeDeleteScopeOption[]
@@ -43,6 +56,7 @@ type PartServicePopupProps = {
   tintScopeOptions: readonly TintScopeOption[]
   canApplyAllWraps: boolean
   canResetAllWraps: boolean
+  canResetCaliperPaint: boolean
   canResetChromeDelete: boolean
   canResetTint: boolean
   canResetWrap: boolean
@@ -52,10 +66,13 @@ type PartServicePopupProps = {
   onCancel: () => void
   onClose: () => void
   onResetAllWraps: () => void
+  onResetCaliperPaint: () => void
   onResetChromeDelete: () => void
   onResetTint: () => void
   onResetWrap: () => void
   onSelectService: (serviceId: ServiceId) => void
+  onUpdateCaliperPaintDraft: (patch: Partial<CaliperPaintConfig>) => void
+  onUpdateCaliperPaintScope: (scope: CaliperPaintScope) => void
   onUpdateChromeDeleteDraft: (patch: Partial<ChromeDeleteConfig>) => void
   onUpdateChromeDeleteScope: (scope: ChromeDeleteScope) => void
   onUpdateTintDraft: (patch: Partial<TintConfig>) => void
@@ -66,9 +83,13 @@ type PartServicePopupProps = {
 export function PartServicePopup({
   canApplyAllWraps,
   canResetAllWraps,
+  canResetCaliperPaint,
   canResetChromeDelete,
   canResetTint,
   canResetWrap,
+  caliperPaintConfig,
+  caliperPaintScope,
+  caliperPaintScopeOptions,
   chromeDeleteConfig,
   chromeDeleteScope,
   chromeDeleteScopeOptions,
@@ -84,10 +105,13 @@ export function PartServicePopup({
   onCancel,
   onClose,
   onResetAllWraps,
+  onResetCaliperPaint,
   onResetChromeDelete,
   onResetTint,
   onResetWrap,
   onSelectService,
+  onUpdateCaliperPaintDraft,
+  onUpdateCaliperPaintScope,
   onUpdateChromeDeleteDraft,
   onUpdateChromeDeleteScope,
   onUpdateTintDraft,
@@ -101,16 +125,29 @@ export function PartServicePopup({
     selectedServiceId === 'chrome-delete' &&
     chromeDeleteConfig !== null &&
     chromeDeleteScope !== null
+  const showCaliperPaintEditor =
+    selectedServiceId === 'caliper-paint' &&
+    caliperPaintConfig !== null &&
+    caliperPaintScope !== null
   const showServiceList =
-    !showWrapEditor && !showTintEditor && !showChromeDeleteEditor
+    !showWrapEditor &&
+    !showTintEditor &&
+    !showChromeDeleteEditor &&
+    !showCaliperPaintEditor
   const syncedHexValue = wrapConfig?.color.toUpperCase() ?? '#C49D59'
   const syncedChromeDeleteHexValue =
     chromeDeleteConfig?.color.toUpperCase() ?? '#050505'
+  const syncedCaliperPaintHexValue =
+    caliperPaintConfig?.color.toUpperCase() ?? '#D51F28'
   const [hexInput, setHexInput] = useState<{
     source: string
     value: string
   } | null>(null)
   const [chromeDeleteHexInput, setChromeDeleteHexInput] = useState<{
+    source: string
+    value: string
+  } | null>(null)
+  const [caliperPaintHexInput, setCaliperPaintHexInput] = useState<{
     source: string
     value: string
   } | null>(null)
@@ -120,6 +157,10 @@ export function PartServicePopup({
     chromeDeleteHexInput?.source === syncedChromeDeleteHexValue
       ? chromeDeleteHexInput.value
       : syncedChromeDeleteHexValue
+  const caliperPaintHexValue =
+    caliperPaintHexInput?.source === syncedCaliperPaintHexValue
+      ? caliperPaintHexInput.value
+      : syncedCaliperPaintHexValue
   const [customTint, setCustomTint] = useState<{
     active: boolean
     source: number
@@ -187,6 +228,37 @@ export function PartServicePopup({
 
   function handleChromeDeleteHexBlur() {
     setChromeDeleteHexInput(null)
+  }
+
+  function handleCaliperPaintColorChange(color: string) {
+    const normalizedColor = color.toUpperCase()
+
+    setCaliperPaintHexInput(null)
+    onUpdateCaliperPaintDraft({ color: normalizedColor.toLowerCase() })
+  }
+
+  function handleCaliperPaintHexChange(value: string) {
+    const nextValue = value.trim().toUpperCase()
+    const prefixedValue = nextValue.startsWith('#')
+      ? nextValue
+      : `#${nextValue}`
+
+    if (!partialHexColorPattern.test(prefixedValue)) {
+      return
+    }
+
+    setCaliperPaintHexInput({
+      source: syncedCaliperPaintHexValue,
+      value: prefixedValue,
+    })
+
+    if (validHexColorPattern.test(prefixedValue)) {
+      onUpdateCaliperPaintDraft({ color: prefixedValue.toLowerCase() })
+    }
+  }
+
+  function handleCaliperPaintHexBlur() {
+    setCaliperPaintHexInput(null)
   }
 
   function handleTintShadeSelect(vlt: number) {
@@ -410,6 +482,73 @@ export function PartServicePopup({
         </div>
       ) : null}
 
+      {showCaliperPaintEditor && caliperPaintConfig && caliperPaintScope ? (
+        <div className="part-popup-wrap" aria-label="Caliper Paint options">
+          <label className="part-popup-field">
+            <span>Color</span>
+            <div className="part-popup-color-row">
+              <input
+                type="color"
+                className="part-popup-color-input"
+                value={caliperPaintConfig.color}
+                onChange={(event) =>
+                  handleCaliperPaintColorChange(event.currentTarget.value)
+                }
+              />
+              <input
+                type="text"
+                className="part-popup-hex-input"
+                aria-label="Hex color"
+                inputMode="text"
+                maxLength={7}
+                spellCheck={false}
+                value={caliperPaintHexValue}
+                onBlur={handleCaliperPaintHexBlur}
+                onChange={(event) =>
+                  handleCaliperPaintHexChange(event.currentTarget.value)
+                }
+              />
+            </div>
+          </label>
+
+          <div>
+            <p className="part-popup-finish-label">Finish</p>
+            <div className="part-popup-finish-grid" aria-label="Finish">
+              {caliperPaintFinishOptions.map((finish) => (
+                <button
+                  type="button"
+                  className="part-popup-finish"
+                  data-selected={caliperPaintConfig.finish === finish.id}
+                  key={finish.id}
+                  onClick={() =>
+                    onUpdateCaliperPaintDraft({ finish: finish.id })
+                  }
+                >
+                  {finish.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <p className="part-popup-finish-label">Apply To</p>
+            <div className="part-popup-finish-grid" aria-label="Apply To">
+              {caliperPaintScopeOptions.map((scope) => (
+                <button
+                  type="button"
+                  className="part-popup-finish"
+                  data-selected={caliperPaintScope === scope.id}
+                  key={scope.id}
+                  onClick={() => onUpdateCaliperPaintScope(scope.id)}
+                >
+                  {scope.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {showServiceList ? (
         <div className="part-popup-services" aria-label="Services">
           {target.services.map((serviceId) => {
@@ -503,6 +642,27 @@ export function PartServicePopup({
               type="button"
               className="part-popup-link"
               onClick={onResetChromeDelete}
+            >
+              Reset
+            </button>
+          ) : null}
+          <button type="button" className="part-popup-apply" onClick={onApply}>
+            Apply
+          </button>
+        </div>
+      ) : showCaliperPaintEditor ? (
+        <div className="part-popup-actions part-popup-actions--wrap">
+          <button type="button" className="part-popup-link" onClick={onBack}>
+            Back
+          </button>
+          <button type="button" className="part-popup-link" onClick={onCancel}>
+            Cancel
+          </button>
+          {canResetCaliperPaint ? (
+            <button
+              type="button"
+              className="part-popup-link"
+              onClick={onResetCaliperPaint}
             >
               Reset
             </button>

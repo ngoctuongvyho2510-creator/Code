@@ -1,4 +1,6 @@
 import type {
+  CaliperPaintScope,
+  CaliperPaintScopeOption,
   ChromeDeleteScope,
   ChromeDeleteScopeOption,
   PartGroup,
@@ -67,6 +69,13 @@ export const CHROME_DELETE_PART_IDS = [
   'rear-diffuser-chrome',
 ] as const
 
+export const CALIPER_PAINT_PART_IDS = [
+  'caliper-front-left',
+  'caliper-front-right',
+  'caliper-rear-left',
+  'caliper-rear-right',
+] as const
+
 const FRONT_SIDE_TINT_PART_IDS = [
   'front-window-left',
   'front-window-right',
@@ -98,6 +107,16 @@ const LOWER_GRILLE_CHROME_DELETE_PART_IDS = [
   'lower-chrome-right',
 ] as const
 
+const FRONT_CALIPER_PAINT_PART_IDS = [
+  'caliper-front-left',
+  'caliper-front-right',
+] as const
+
+const REAR_CALIPER_PAINT_PART_IDS = [
+  'caliper-rear-left',
+  'caliper-rear-right',
+] as const
+
 const tintScopeLabels = {
   this: 'This',
   pair: 'Pair',
@@ -110,6 +129,13 @@ const chromeDeleteScopeLabels = {
   both: 'Both',
   'all-chrome': 'All Chrome',
 } as const satisfies Record<ChromeDeleteScope, string>
+
+const caliperPaintScopeLabels = {
+  this: 'This',
+  front: 'Front',
+  rear: 'Rear',
+  all: 'All',
+} as const satisfies Record<CaliperPaintScope, string>
 
 const tintScopesByPartId = {
   windshield: ['this', 'all'],
@@ -155,6 +181,16 @@ const chromeDeleteBothPartIdsByPartId = {
   'lower-chrome-right': LOWER_GRILLE_CHROME_DELETE_PART_IDS,
 } as const satisfies Partial<
   Record<(typeof CHROME_DELETE_PART_IDS)[number], readonly string[]>
+>
+
+const caliperPaintScopesByPartId = {
+  'caliper-front-left': ['this', 'front', 'rear', 'all'],
+  'caliper-front-right': ['this', 'front', 'rear', 'all'],
+  'caliper-rear-left': ['this', 'front', 'rear', 'all'],
+  'caliper-rear-right': ['this', 'front', 'rear', 'all'],
+} as const satisfies Record<
+  (typeof CALIPER_PAINT_PART_IDS)[number],
+  readonly CaliperPaintScope[]
 >
 
 export const FULL_BODY_MESH_NAMES = [
@@ -294,10 +330,10 @@ export const VEHICLE_PARTS = [
   vehiclePart('center-cap-rear-left', 'Center Cap RL', ['MW_PART_CENTER_CAP_RL', 'MW_EMBLEM_AUDI_CENTER_CAP_RL'], 'center-cap', CENTER_CAP_SERVICES, 'wheel'),
   vehiclePart('center-cap-rear-right', 'Center Cap RR', ['MW_PART_CENTER_CAP_RR', 'MW_EMBLEM_AUDI_CENTER_CAP_RR'], 'center-cap', CENTER_CAP_SERVICES, 'wheel'),
 
-  vehiclePart('caliper-front-left', 'Caliper FL', ['MW_CALIPER_FL'], 'caliper', CALIPER_SERVICES, 'brake'),
-  vehiclePart('caliper-front-right', 'Caliper FR', ['MW_CALIPER_FR'], 'caliper', CALIPER_SERVICES, 'brake'),
-  vehiclePart('caliper-rear-left', 'Caliper RL', ['MW_CALIPER_RL'], 'caliper', CALIPER_SERVICES, 'brake'),
-  vehiclePart('caliper-rear-right', 'Caliper RR', ['MW_CALIPER_RR'], 'caliper', CALIPER_SERVICES, 'brake'),
+  vehiclePart('caliper-front-left', 'Front Left Caliper', ['MW_CALIPER_FL'], 'caliper', CALIPER_SERVICES, 'brake'),
+  vehiclePart('caliper-front-right', 'Front Right Caliper', ['MW_CALIPER_FR'], 'caliper', CALIPER_SERVICES, 'brake'),
+  vehiclePart('caliper-rear-left', 'Rear Left Caliper', ['MW_CALIPER_RL'], 'caliper', CALIPER_SERVICES, 'brake'),
+  vehiclePart('caliper-rear-right', 'Rear Right Caliper', ['MW_CALIPER_RR'], 'caliper', CALIPER_SERVICES, 'brake'),
   vehiclePart('brake-disc-front-left', 'Disc FL', ['MW_BRAKE_DISC_FL'], 'brake-disc', BRAKE_DISC_SERVICES, 'brake'),
   vehiclePart('brake-disc-front-right', 'Disc FR', ['MW_BRAKE_DISC_FR'], 'brake-disc', BRAKE_DISC_SERVICES, 'brake'),
   vehiclePart('brake-disc-rear-left', 'Disc RL', ['MW_BRAKE_DISC_RL'], 'brake-disc', BRAKE_DISC_SERVICES, 'brake'),
@@ -351,6 +387,10 @@ export const TINTABLE_GLASS_MESH_NAMES = TINTABLE_GLASS_PART_IDS.flatMap(
 )
 
 export const CHROME_DELETE_MESH_NAMES = CHROME_DELETE_PART_IDS.flatMap(
+  (partId) => partById.get(partId)?.meshNames ?? [],
+)
+
+export const CALIPER_PAINT_MESH_NAMES = CALIPER_PAINT_PART_IDS.flatMap(
   (partId) => partById.get(partId)?.meshNames ?? [],
 )
 
@@ -411,6 +451,64 @@ export function resolveChromeDeleteScopeTargetIds(
     ]
 
   return bothIds ?? []
+}
+
+export function isCaliperPaintTarget(targetId: string): boolean {
+  return CALIPER_PAINT_PART_IDS.includes(
+    targetId as (typeof CALIPER_PAINT_PART_IDS)[number],
+  )
+}
+
+export function getDefaultCaliperPaintScope(
+  targetId: string,
+): CaliperPaintScope | null {
+  return getCaliperPaintScopeOptions(targetId)[0]?.id ?? null
+}
+
+export function getCaliperPaintScopeOptions(
+  targetId: string,
+): readonly CaliperPaintScopeOption[] {
+  if (!isCaliperPaintTarget(targetId)) {
+    return []
+  }
+
+  const partId = targetId as (typeof CALIPER_PAINT_PART_IDS)[number]
+
+  return caliperPaintScopesByPartId[partId].map((scope) => ({
+    id: scope,
+    label: caliperPaintScopeLabels[scope],
+  }))
+}
+
+export function resolveCaliperPaintScopeTargetIds(
+  targetId: string,
+  scope: CaliperPaintScope,
+): readonly string[] {
+  if (!isCaliperPaintTarget(targetId)) {
+    return []
+  }
+
+  const validScopes = caliperPaintScopesByPartId[
+    targetId as (typeof CALIPER_PAINT_PART_IDS)[number]
+  ]
+
+  if (!(validScopes as readonly CaliperPaintScope[]).includes(scope)) {
+    return []
+  }
+
+  if (scope === 'this') {
+    return [targetId]
+  }
+
+  if (scope === 'front') {
+    return FRONT_CALIPER_PAINT_PART_IDS
+  }
+
+  if (scope === 'rear') {
+    return REAR_CALIPER_PAINT_PART_IDS
+  }
+
+  return CALIPER_PAINT_PART_IDS
 }
 
 export function isTintableGlassTarget(targetId: string): boolean {
