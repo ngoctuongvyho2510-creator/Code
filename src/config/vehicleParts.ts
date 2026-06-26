@@ -29,6 +29,12 @@ const PAINTED_BODY_SERVICES = [
   'ceramic',
 ] as const satisfies readonly ServiceId[]
 
+const FULL_BODY_SERVICES = [
+  'wrap',
+  'ppf',
+  'ceramic',
+] as const satisfies readonly ServiceId[]
+
 const CHROME_SERVICES = [
   'chrome-delete',
   'ppf',
@@ -352,7 +358,7 @@ export const FULL_BODY_TARGET: VehiclePartDefinition = {
   selectable: true,
   fullBody: true,
   surfaceType: 'painted-body',
-  services: PAINTED_BODY_SERVICES,
+  services: FULL_BODY_SERVICES,
   group: 'body',
 }
 
@@ -483,6 +489,18 @@ export const FULL_BODY_PART_IDS = VEHICLE_PARTS.filter(
 export const WRAP_CAPABLE_MESH_NAMES = VEHICLE_PARTS.filter(
   (part) => part.selectable && !part.visualOnly && part.services.includes('wrap'),
 ).flatMap((part) => part.meshNames)
+
+export const ARTWORK_PART_IDS = VEHICLE_PARTS.filter(
+  (part) =>
+    part.selectable &&
+    !part.visualOnly &&
+    part.surfaceType === 'painted-body' &&
+    part.services.includes('artwork'),
+).map((part) => part.id)
+
+export const ARTWORK_MESH_NAMES = ARTWORK_PART_IDS.flatMap(
+  (partId) => partById.get(partId)?.meshNames ?? [],
+)
 
 export const TINTABLE_GLASS_MESH_NAMES = TINTABLE_GLASS_PART_IDS.flatMap(
   (partId) => partById.get(partId)?.meshNames ?? [],
@@ -683,6 +701,10 @@ export function isLightTintTarget(targetId: string): boolean {
   return LIGHT_TINT_PART_IDS.includes(
     targetId as (typeof LIGHT_TINT_PART_IDS)[number],
   )
+}
+
+export function isArtworkTarget(targetId: string): boolean {
+  return ARTWORK_PART_IDS.includes(targetId)
 }
 
 export function getDefaultLightTintScope(

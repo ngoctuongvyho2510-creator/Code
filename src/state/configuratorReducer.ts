@@ -7,6 +7,7 @@ import {
   getDefaultPowderCoatScope,
   getDefaultTintScope,
   getSelectionTarget,
+  isArtworkTarget,
   resolveCaliperPaintScopeTargetIds,
   resolveChromeDeleteScopeTargetIds,
   resolveLightTintScopeTargetIds,
@@ -15,6 +16,10 @@ import {
 } from '../config/vehicleParts'
 import type {
   AppliedDesignState,
+  ArtworkDraftState,
+  ArtworkMode,
+  ArtworkPlacement,
+  ArtworkVector3,
   CaliperPaintConfig,
   CaliperPaintFinish,
   CaliperPaintScope,
@@ -63,6 +68,11 @@ const DEFAULT_POWDER_COAT_CONFIG: PowderCoatConfig = {
   color: '#2d3135',
   finish: 'satin',
 }
+
+const DEFAULT_ARTWORK_PLACE_SIZE = 0.68
+const DEFAULT_ARTWORK_FILL_SCALE = 1
+const DEFAULT_ARTWORK_ASPECT_RATIO = 1
+let artworkIdCounter = 0
 
 export type ConfiguratorState = {
   appliedDesign: AppliedDesignState
@@ -123,6 +133,10 @@ export type ConfiguratorAction =
       scope: PowderCoatScope
     }
   | {
+      type: 'update-artwork-draft'
+      patch: Partial<ArtworkDraftState>
+    }
+  | {
       type: 'clear-service'
     }
   | {
@@ -164,6 +178,15 @@ export type ConfiguratorAction =
       scope: PowderCoatScope
     }
   | {
+      type: 'remove-artwork'
+      targetId: SelectionTargetId
+      artworkId: string
+    }
+  | {
+      type: 'remove-all-artwork'
+      targetId: SelectionTargetId
+    }
+  | {
       type: 'reset-all-wraps'
     }
 
@@ -175,7 +198,7 @@ function createLayeredSurfaceState(): LayeredSurfaceState {
     chromeDelete: null,
     caliperPaint: null,
     powderCoat: null,
-    artwork: null,
+    artwork: [],
     ppf: null,
     ceramic: null,
     services: {},
@@ -220,13 +243,6 @@ function applyServiceToSurface(
     return {
       ...surfaceState,
       powderCoat: DEFAULT_POWDER_COAT_CONFIG,
-    }
-  }
-
-  if (serviceId === 'artwork') {
-    return {
-      ...surfaceState,
-      artwork: appliedService,
     }
   }
 
@@ -367,6 +383,35 @@ function clearPowderCoatFromSurface(
   }
 }
 
+function appendArtworkToSurface(
+  surfaceState: LayeredSurfaceState,
+  artwork: ArtworkPlacement,
+): LayeredSurfaceState {
+  return {
+    ...surfaceState,
+    artwork: [...surfaceState.artwork, artwork],
+  }
+}
+
+function removeArtworkFromSurface(
+  surfaceState: LayeredSurfaceState,
+  artworkId: string,
+): LayeredSurfaceState {
+  return {
+    ...surfaceState,
+    artwork: surfaceState.artwork.filter((artwork) => artwork.id !== artworkId),
+  }
+}
+
+function clearArtworkFromSurface(
+  surfaceState: LayeredSurfaceState,
+): LayeredSurfaceState {
+  return {
+    ...surfaceState,
+    artwork: [],
+  }
+}
+
 function getAppliedWrapForTarget(
   appliedDesign: AppliedDesignState,
   targetId: SelectionTargetId,
@@ -478,6 +523,41 @@ function createPowderCoatDraft(
   )
 }
 
+function createArtworkId(): string {
+  artworkIdCounter += 1
+  return `artwork-${Date.now()}-${artworkIdCounter}`
+}
+
+function createArtworkDraft(
+  appliedDesign: AppliedDesignState,
+  targetId: SelectionTargetId,
+): ArtworkDraftState | null {
+  if (!isArtworkTarget(targetId)) {
+    return null
+  }
+
+  const appliedArtwork = appliedDesign.parts[targetId]?.artwork ?? []
+  const selectedArtwork = appliedArtwork.at(-1) ?? null
+
+  return {
+    id: createArtworkId(),
+    targetPartId: targetId,
+    mode: 'place',
+    imageSource: null,
+    fileName: '',
+    imageWidth: 0,
+    imageHeight: 0,
+    aspectRatio: DEFAULT_ARTWORK_ASPECT_RATIO,
+    lowResolution: false,
+    error: null,
+    selectedArtworkId: selectedArtwork?.id ?? null,
+    scale: DEFAULT_ARTWORK_PLACE_SIZE,
+    rotation: 0,
+    offsetX: 0,
+    offsetY: 0,
+  }
+}
+
 function updateWrapDraft(
   currentWrap: WrapConfig,
   patch: Partial<WrapConfig>,
@@ -554,8 +634,63 @@ function updatePowderCoatDraft(
   }
 }
 
+function updateArtworkDraft(
+  currentArtwork: ArtworkDraftState,
+  patch: Partial<ArtworkDraftState>,
+): ArtworkDraftState {
+  const mode = isArtworkMode(patch.mode) ? patch.mode : currentArtwork.mode
+  const imageWidth = clampArtworkImageDimension(
+    patch.imageWidth ?? currentArtwork.imageWidth,
+  )
+  const imageHeight = clampArtworkImageDimension(
+    patch.imageHeight ?? currentArtwork.imageHeight,
+  )
+  const aspectRatio = clampArtworkAspectRatio(
+    patch.aspectRatio ?? currentArtwork.aspectRatio,
+    imageWidth,
+    imageHeight,
+  )
+  const nextScale = clampArtworkScale(patch.scale ?? currentArtwork.scale, mode)
+
+  return {
+    ...currentArtwork,
+    imageSource:
+      patch.imageSource === undefined
+        ? currentArtwork.imageSource
+        : patch.imageSource,
+    fileName: patch.fileName ?? currentArtwork.fileName,
+    imageWidth,
+    imageHeight,
+    aspectRatio,
+    lowResolution: patch.lowResolution ?? currentArtwork.lowResolution,
+    error: patch.error === undefined ? currentArtwork.error : patch.error,
+    selectedArtworkId:
+      patch.selectedArtworkId === undefined
+        ? currentArtwork.selectedArtworkId
+        : patch.selectedArtworkId,
+    mode,
+    position: patch.position ?? currentArtwork.position,
+    orientation: patch.orientation ?? currentArtwork.orientation,
+    size:
+      patch.size ??
+      (mode === 'place'
+        ? getArtworkSizeVector(nextScale, aspectRatio)
+        : currentArtwork.size),
+    scale: nextScale,
+    rotation: clampArtworkRotation(
+      patch.rotation ?? currentArtwork.rotation,
+    ),
+    offsetX: clampArtworkOffset(patch.offsetX ?? currentArtwork.offsetX),
+    offsetY: clampArtworkOffset(patch.offsetY ?? currentArtwork.offsetY),
+  }
+}
+
 function isWrapFinish(finish: WrapFinish | undefined): finish is WrapFinish {
   return finish === 'gloss' || finish === 'satin' || finish === 'matte'
+}
+
+function isArtworkMode(mode: ArtworkMode | undefined): mode is ArtworkMode {
+  return mode === 'place' || mode === 'fill'
 }
 
 function isChromeDeleteFinish(
@@ -590,6 +725,110 @@ function clampLightTintDarkness(darkness: number): number {
   }
 
   return Math.min(100, Math.max(0, Math.round(darkness)))
+}
+
+function clampArtworkImageDimension(dimension: number): number {
+  if (!Number.isFinite(dimension)) {
+    return 0
+  }
+
+  return Math.max(0, Math.round(dimension))
+}
+
+function clampArtworkAspectRatio(
+  aspectRatio: number,
+  imageWidth: number,
+  imageHeight: number,
+): number {
+  if (imageWidth > 0 && imageHeight > 0) {
+    return imageWidth / imageHeight
+  }
+
+  if (!Number.isFinite(aspectRatio) || aspectRatio <= 0) {
+    return DEFAULT_ARTWORK_ASPECT_RATIO
+  }
+
+  return Math.min(20, Math.max(0.05, aspectRatio))
+}
+
+function clampArtworkScale(scale: number, mode: ArtworkMode): number {
+  const defaultScale =
+    mode === 'fill' ? DEFAULT_ARTWORK_FILL_SCALE : DEFAULT_ARTWORK_PLACE_SIZE
+
+  if (!Number.isFinite(scale)) {
+    return defaultScale
+  }
+
+  if (mode === 'fill') {
+    return Math.min(4, Math.max(1, scale))
+  }
+
+  return Math.min(2.2, Math.max(0.12, scale))
+}
+
+function clampArtworkRotation(rotation: number): number {
+  if (!Number.isFinite(rotation)) {
+    return 0
+  }
+
+  return Math.min(180, Math.max(-180, rotation))
+}
+
+function clampArtworkOffset(offset: number): number {
+  if (!Number.isFinite(offset)) {
+    return 0
+  }
+
+  return Math.min(1, Math.max(-1, offset))
+}
+
+function getArtworkSizeVector(
+  scale: number,
+  aspectRatio: number,
+): ArtworkVector3 {
+  const safeAspectRatio = clampArtworkAspectRatio(aspectRatio, 0, 0)
+  const width =
+    safeAspectRatio >= 1 ? scale : Math.max(0.01, scale * safeAspectRatio)
+  const height =
+    safeAspectRatio >= 1 ? Math.max(0.01, scale / safeAspectRatio) : scale
+  const depth = Math.max(0.08, Math.max(width, height) * 0.45)
+
+  return [width, height, depth] as const
+}
+
+function buildArtworkPlacement(
+  artworkDraft: ArtworkDraftState,
+): ArtworkPlacement | null {
+  if (!artworkDraft.imageSource) {
+    return null
+  }
+
+  const size: ArtworkVector3 = getArtworkSizeVector(
+    artworkDraft.scale,
+    artworkDraft.aspectRatio,
+  )
+
+  return {
+    id: artworkDraft.id,
+    targetPartId: artworkDraft.targetPartId,
+    mode: artworkDraft.mode,
+    imageSource: artworkDraft.imageSource,
+    fileName: artworkDraft.fileName,
+    imageWidth: artworkDraft.imageWidth,
+    imageHeight: artworkDraft.imageHeight,
+    aspectRatio: clampArtworkAspectRatio(
+      artworkDraft.aspectRatio,
+      artworkDraft.imageWidth,
+      artworkDraft.imageHeight,
+    ),
+    position: artworkDraft.position,
+    orientation: artworkDraft.orientation,
+    size,
+    scale: artworkDraft.scale,
+    rotation: artworkDraft.rotation,
+    offsetX: artworkDraft.offsetX,
+    offsetY: artworkDraft.offsetY,
+  }
 }
 
 function clearFullBodyPartWraps(
@@ -829,6 +1068,7 @@ export function configuratorReducer(
         caliperPaintScope: null,
         powderCoatConfig: null,
         powderCoatScope: null,
+        artworkConfig: null,
       },
     }
   }
@@ -894,6 +1134,17 @@ export function configuratorReducer(
             state.draftSelection.targetId,
           )
         : null
+    const artworkConfig =
+      action.serviceId === 'artwork'
+        ? createArtworkDraft(
+            state.appliedDesign,
+            state.draftSelection.targetId,
+          )
+        : null
+
+    if (action.serviceId === 'artwork' && !artworkConfig) {
+      return state
+    }
 
     return {
       ...state,
@@ -911,6 +1162,7 @@ export function configuratorReducer(
         caliperPaintScope: defaultCaliperPaintScope,
         powderCoatConfig,
         powderCoatScope: defaultPowderCoatScope,
+        artworkConfig,
       },
     }
   }
@@ -1172,6 +1424,30 @@ export function configuratorReducer(
     }
   }
 
+  if (action.type === 'update-artwork-draft') {
+    const draftSelection = state.draftSelection
+
+    if (draftSelection?.serviceId !== 'artwork') {
+      return state
+    }
+
+    const currentArtwork =
+      draftSelection.artworkConfig ??
+      createArtworkDraft(state.appliedDesign, draftSelection.targetId)
+
+    if (!currentArtwork) {
+      return state
+    }
+
+    return {
+      ...state,
+      draftSelection: {
+        ...draftSelection,
+        artworkConfig: updateArtworkDraft(currentArtwork, action.patch),
+      },
+    }
+  }
+
   if (action.type === 'clear-service') {
     if (!state.draftSelection) {
       return state
@@ -1193,6 +1469,7 @@ export function configuratorReducer(
         caliperPaintScope: null,
         powderCoatConfig: null,
         powderCoatScope: null,
+        artworkConfig: null,
       },
     }
   }
@@ -1384,6 +1661,39 @@ export function configuratorReducer(
             powderCoatTargetIds,
             draftSelection.powderCoatConfig,
           ),
+        },
+        draftSelection: null,
+      }
+    }
+
+    if (draftSelection.serviceId === 'artwork') {
+      if (!isArtworkTarget(draftSelection.targetId)) {
+        return state
+      }
+
+      const artworkPlacement = draftSelection.artworkConfig
+        ? buildArtworkPlacement(draftSelection.artworkConfig)
+        : null
+
+      if (!artworkPlacement) {
+        return state
+      }
+
+      const currentPartState =
+        state.appliedDesign.parts[draftSelection.targetId] ??
+        createLayeredSurfaceState()
+
+      return {
+        ...state,
+        appliedDesign: {
+          ...state.appliedDesign,
+          parts: {
+            ...state.appliedDesign.parts,
+            [draftSelection.targetId]: appendArtworkToSurface(
+              currentPartState,
+              artworkPlacement,
+            ),
+          },
         },
         draftSelection: null,
       }
@@ -1583,6 +1893,51 @@ export function configuratorReducer(
           state.appliedDesign.parts,
           powderCoatTargetIds,
         ),
+      },
+      draftSelection: null,
+    }
+  }
+
+  if (action.type === 'remove-artwork') {
+    if (!isArtworkTarget(action.targetId)) {
+      return state
+    }
+
+    const currentPartState =
+      state.appliedDesign.parts[action.targetId] ?? createLayeredSurfaceState()
+
+    return {
+      ...state,
+      appliedDesign: {
+        ...state.appliedDesign,
+        parts: {
+          ...state.appliedDesign.parts,
+          [action.targetId]: removeArtworkFromSurface(
+            currentPartState,
+            action.artworkId,
+          ),
+        },
+      },
+      draftSelection: null,
+    }
+  }
+
+  if (action.type === 'remove-all-artwork') {
+    if (!isArtworkTarget(action.targetId)) {
+      return state
+    }
+
+    const currentPartState =
+      state.appliedDesign.parts[action.targetId] ?? createLayeredSurfaceState()
+
+    return {
+      ...state,
+      appliedDesign: {
+        ...state.appliedDesign,
+        parts: {
+          ...state.appliedDesign.parts,
+          [action.targetId]: clearArtworkFromSurface(currentPartState),
+        },
       },
       draftSelection: null,
     }

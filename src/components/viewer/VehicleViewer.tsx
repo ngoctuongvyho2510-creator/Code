@@ -14,6 +14,8 @@ import { S4Model } from './S4Model'
 import { ViewerErrorBoundary } from './ViewerErrorBoundary'
 import type {
   AppliedDesignState,
+  ArtworkDraftState,
+  ArtworkPreviewState,
   CaliperPaintPreviewState,
   ChromeDeletePreviewState,
   LightTintPreviewState,
@@ -33,6 +35,7 @@ export type VehicleViewerHandle = {
 
 type VehicleViewerProps = {
   appliedDesign: AppliedDesignState
+  artworkPreview: ArtworkPreviewState | null
   caliperPaintPreview: CaliperPaintPreviewState | null
   chromeDeletePreview: ChromeDeletePreviewState | null
   lightTintPreview: LightTintPreviewState | null
@@ -40,6 +43,7 @@ type VehicleViewerProps = {
   selectedTargetId: string | null
   tintPreview: TintPreviewState | null
   wrapPreview: WrapPreviewState | null
+  onArtworkPreviewTransformChange: (patch: Partial<ArtworkDraftState>) => void
   onPartSelect: (partId: string) => void
   onScenePointerMissed: () => void
 }
@@ -135,6 +139,7 @@ function InitialViewState({ controlsRef, onResetReady }: InitialViewStateProps) 
 
 type ViewerSceneProps = {
   appliedDesign: AppliedDesignState
+  artworkPreview: ArtworkPreviewState | null
   caliperPaintPreview: CaliperPaintPreviewState | null
   chromeDeletePreview: ChromeDeletePreviewState | null
   lightTintPreview: LightTintPreviewState | null
@@ -145,10 +150,12 @@ type ViewerSceneProps = {
   selectedTargetId: string | null
   tintPreview: TintPreviewState | null
   wrapPreview: WrapPreviewState | null
+  onArtworkPreviewTransformChange: (patch: Partial<ArtworkDraftState>) => void
 }
 
 function ViewerScene({
   appliedDesign,
+  artworkPreview,
   caliperPaintPreview,
   chromeDeletePreview,
   lightTintPreview,
@@ -159,6 +166,7 @@ function ViewerScene({
   selectedTargetId,
   tintPreview,
   wrapPreview,
+  onArtworkPreviewTransformChange,
 }: ViewerSceneProps) {
   const controlsRef = useRef<OrbitControlsImpl | null>(null)
 
@@ -193,6 +201,7 @@ function ViewerScene({
           <InitialViewState controlsRef={controlsRef} onResetReady={onResetReady} />
           <S4Model
             appliedDesign={appliedDesign}
+            artworkPreview={artworkPreview}
             caliperPaintPreview={caliperPaintPreview}
             chromeDeletePreview={chromeDeletePreview}
             controlsRef={controlsRef}
@@ -201,6 +210,7 @@ function ViewerScene({
             selectedTargetId={selectedTargetId}
             tintPreview={tintPreview}
             wrapPreview={wrapPreview}
+            onArtworkPreviewTransformChange={onArtworkPreviewTransformChange}
             onPartSelect={onPartSelect}
             onSelectionClear={onScenePointerMissed}
           />
@@ -214,6 +224,7 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
   function VehicleViewer(
     {
       appliedDesign,
+      artworkPreview,
       caliperPaintPreview,
       chromeDeletePreview,
       lightTintPreview,
@@ -223,6 +234,7 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
       selectedTargetId,
       tintPreview,
       wrapPreview,
+      onArtworkPreviewTransformChange,
     },
     ref,
   ) {
@@ -264,6 +276,7 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
         >
           <ViewerScene
             appliedDesign={appliedDesign}
+            artworkPreview={artworkPreview}
             caliperPaintPreview={caliperPaintPreview}
             chromeDeletePreview={chromeDeletePreview}
             lightTintPreview={lightTintPreview}
@@ -271,6 +284,7 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
             selectedTargetId={selectedTargetId}
             tintPreview={tintPreview}
             wrapPreview={wrapPreview}
+            onArtworkPreviewTransformChange={onArtworkPreviewTransformChange}
             onPartSelect={onPartSelect}
             onScenePointerMissed={onScenePointerMissed}
             onResetReady={handleResetReady}

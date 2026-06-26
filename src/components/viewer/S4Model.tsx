@@ -4,8 +4,10 @@ import { useThree } from '@react-three/fiber'
 import {
   Box3,
   BufferGeometry,
+  ClampToEdgeWrapping,
   Color,
   EdgesGeometry,
+  Euler,
   FrontSide,
   LineBasicMaterial,
   LineSegments,
@@ -21,11 +23,15 @@ import {
   Texture,
   Vector2,
   Vector3,
+  MathUtils,
   type Object3DEventMap,
+  type Intersection,
 } from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
+import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import {
+  ARTWORK_MESH_NAMES,
   CALIPER_PAINT_MESH_NAMES,
   CHROME_DELETE_MESH_NAMES,
   FULL_BODY_MESH_NAMES,
@@ -40,6 +46,10 @@ import {
 } from '../../config/vehicleParts'
 import type {
   AppliedDesignState,
+  ArtworkDraftState,
+  ArtworkPlacement,
+  ArtworkPreviewState,
+  ArtworkVector3,
   CaliperPaintConfig,
   CaliperPaintFinish,
   CaliperPaintPreviewState,
@@ -69,6 +79,11 @@ const CAMERA_ROTATION_EPSILON = 0.001
 const OUTLINE_EDGE_THRESHOLD_DEGREES = 28
 const HOVER_OUTLINE_COLOR = new Color('#c49d59')
 const SELECTED_OUTLINE_COLOR = new Color('#f1c76d')
+const ARTWORK_SURFACE_OFFSET = 0.0015
+const ARTWORK_RENDER_ORDER = 14
+const ARTWORK_PREVIEW_RENDER_ORDER = 16
+const WORLD_UP = new Vector3(0, 1, 0)
+const PROJECTOR_AXIS = new Vector3(0, 0, 1)
 
 type ModelMesh = Mesh<BufferGeometry, Material | Material[], Object3DEventMap>
 
@@ -106,8 +121,13 @@ type PointerStart = {
   target: Vector3 | null
 }
 
+type ArtworkDragState = {
+  pointerId: number
+}
+
 type S4ModelProps = {
   appliedDesign: AppliedDesignState
+  artworkPreview: ArtworkPreviewState | null
   caliperPaintPreview: CaliperPaintPreviewState | null
   controlsRef: RefObject<OrbitControlsImpl | null>
   chromeDeletePreview: ChromeDeletePreviewState | null
@@ -116,6 +136,7 @@ type S4ModelProps = {
   selectedTargetId: string | null
   tintPreview: TintPreviewState | null
   wrapPreview: WrapPreviewState | null
+  onArtworkPreviewTransformChange: (patch: Partial<ArtworkDraftState>) => void
   onPartSelect: (partId: string) => void
   onSelectionClear: () => void
 }
@@ -128,6 +149,7 @@ const inspectedPowderCoatMeshScenes = new WeakSet<Object3D>()
 const inspectedTintableMeshScenes = new WeakSet<Object3D>()
 const inspectedWrapMeshScenes = new WeakSet<Object3D>()
 const plateMeshNames = new Set<string>(LICENSE_PLATE_MESH_NAMES)
+const artworkMeshNames = new Set<string>(ARTWORK_MESH_NAMES)
 const caliperPaintMeshNames = new Set<string>(CALIPER_PAINT_MESH_NAMES)
 const chromeDeleteMeshNames = new Set<string>(CHROME_DELETE_MESH_NAMES)
 const lightTintMeshNames = new Set<string>(LIGHT_TINT_MESH_NAMES)
@@ -1723,6 +1745,252 @@ function getTargetMeshNames(targetId: string | null): Set<string> {
   return new Set(target?.meshNames ?? [])
 }
 
+function vectorToTuple(vector: Vector3): ArtworkVector3 {
+  return [
+    Number(vector.x.toFixed(5)),
+    Number(vector.y.toFixed(5)),
+    Number(vector.z.toFixed(5)),
+  ] as const
+}
+
+function eulerToTuple(euler: Euler): ArtworkVector3 {
+  return [
+    Number(euler.x.toFixed(5)),
+    Number(euler.y.toFixed(5)),
+    Number(euler.z.toFixed(5)),
+  ] as const
+}
+
+function tupleToVector(tuple: ArtworkVector3): Vector3 {
+  return new Vector3(tuple[0], tuple[1], tuple[2])
+}
+
+function tupleToEuler(tuple: ArtworkVector3): Euler {
+  return new Euler(tuple[0], tuple[1], tuple[2])
+}
+
+function getRotatedArtworkOrientation(
+  orientation: ArtworkVector3,
+  rotation: number,
+): Euler {
+  const normal = PROJECTOR_AXIS.clone()
+    .applyEuler(tupleToEuler(orientation))
+    .normalize()
+
+  return createArtworkOrientation(normal, rotation)
+}
+
+function getArtworkAspectRatio(artwork: ArtworkPlacement): number {
+  if (artwork.imageWidth > 0 && artwork.imageHeight > 0) {
+    return artwork.imageWidth / artwork.imageHeight
+  }
+
+  if (Number.isFinite(artwork.aspectRatio) && artwork.aspectRatio > 0) {
+    return artwork.aspectRatio
+  }
+
+  return 1
+}
+
+function getArtworkProjectionSize(
+  scale: number,
+  aspectRatio: number,
+): ArtworkVector3 {
+  const safeScale = Math.max(0.01, scale)
+  const safeAspectRatio =
+    Number.isFinite(aspectRatio) && aspectRatio > 0 ? aspectRatio : 1
+  const width =
+    safeAspectRatio >= 1
+      ? safeScale
+      : Math.max(0.01, safeScale * safeAspectRatio)
+  const height =
+    safeAspectRatio >= 1
+      ? Math.max(0.01, safeScale / safeAspectRatio)
+      : safeScale
+  const depth = Math.max(0.08, Math.max(width, height) * 0.45)
+
+  return [width, height, depth] as const
+}
+
+function getArtworkTargetAspect(mesh: ModelMesh): number {
+  const boundingBox = new Box3().setFromObject(mesh)
+  const size = new Vector3()
+
+  boundingBox.getSize(size)
+
+  const dimensions = [size.x, size.y, size.z]
+    .filter((dimension) => dimension > 0.001)
+    .sort((first, second) => second - first)
+
+  if (dimensions.length < 2) {
+    return 1
+  }
+
+  return dimensions[0] / dimensions[1]
+}
+
+function getArtworkTargetMeshes(
+  scene: Object3D,
+  targetId: string,
+): ModelMesh[] {
+  const target = getSelectionTarget(targetId)
+  const targetMeshNames = new Set(target?.meshNames ?? [])
+  const targetMeshes: ModelMesh[] = []
+
+  scene.traverse((object) => {
+    if (
+      isModelMesh(object) &&
+      artworkMeshNames.has(object.name) &&
+      targetMeshNames.has(object.name)
+    ) {
+      targetMeshes.push(object)
+    }
+  })
+
+  return targetMeshes
+}
+
+function getLargestArtworkMesh(meshes: readonly ModelMesh[]): ModelMesh | null {
+  let largestMesh: ModelMesh | null = null
+  let largestVolume = 0
+
+  for (const mesh of meshes) {
+    const box = new Box3().setFromObject(mesh)
+    const size = new Vector3()
+
+    box.getSize(size)
+
+    const volume = Math.max(0, size.x) * Math.max(0, size.y) * Math.max(0, size.z)
+
+    if (!largestMesh || volume > largestVolume) {
+      largestMesh = mesh
+      largestVolume = volume
+    }
+  }
+
+  return largestMesh
+}
+
+function createArtworkOrientation(normal: Vector3, rotation: number): Euler {
+  const cleanNormal = normal.lengthSq() > 0 ? normal.clone().normalize() : WORLD_UP
+  const orientation = new Quaternion().setFromUnitVectors(
+    PROJECTOR_AXIS,
+    cleanNormal,
+  )
+  const spin = new Quaternion().setFromAxisAngle(
+    PROJECTOR_AXIS,
+    MathUtils.degToRad(rotation),
+  )
+
+  orientation.multiply(spin)
+  return new Euler().setFromQuaternion(orientation)
+}
+
+function getIntersectionNormal(
+  intersection: Intersection<Object3D>,
+  cameraPosition: Vector3,
+): Vector3 {
+  if (!intersection.face) {
+    return cameraPosition.clone().sub(intersection.point).normalize()
+  }
+
+  return intersection.face.normal
+    .clone()
+    .transformDirection(intersection.object.matrixWorld)
+    .normalize()
+}
+
+function getArtworkTransformFromIntersection(
+  intersection: Intersection<Object3D>,
+  cameraPosition: Vector3,
+  scale: number,
+  rotation: number,
+  aspectRatio: number,
+): Partial<ArtworkDraftState> {
+  const normal = getIntersectionNormal(intersection, cameraPosition)
+  const position = intersection.point
+    .clone()
+    .addScaledVector(normal, ARTWORK_SURFACE_OFFSET)
+  const orientation = createArtworkOrientation(normal, rotation)
+  const size = getArtworkProjectionSize(scale, aspectRatio)
+
+  return {
+    position: vectorToTuple(position),
+    orientation: eulerToTuple(orientation),
+    size,
+  }
+}
+
+function getDefaultArtworkTransform(
+  mesh: ModelMesh,
+  cameraPosition: Vector3,
+  scale: number,
+  rotation: number,
+  aspectRatio: number,
+): Partial<ArtworkDraftState> | null {
+  const boundingBox = new Box3().setFromObject(mesh)
+  const center = new Vector3()
+
+  boundingBox.getCenter(center)
+
+  const direction = center.clone().sub(cameraPosition).normalize()
+  const raycaster = new Raycaster(cameraPosition, direction)
+  const intersection = raycaster.intersectObject(mesh, false)[0]
+
+  if (intersection) {
+    return getArtworkTransformFromIntersection(
+      intersection,
+      cameraPosition,
+      scale,
+      rotation,
+      aspectRatio,
+    )
+  }
+
+  const fallbackNormal = cameraPosition.clone().sub(center).normalize()
+  const fallbackPosition = center
+    .clone()
+    .addScaledVector(fallbackNormal, ARTWORK_SURFACE_OFFSET)
+  const fallbackOrientation = createArtworkOrientation(fallbackNormal, rotation)
+
+  return {
+    position: vectorToTuple(fallbackPosition),
+    orientation: eulerToTuple(fallbackOrientation),
+    size: getArtworkProjectionSize(scale, aspectRatio),
+  }
+}
+
+function getArtworkTransformFromPointer(
+  event: PointerEvent,
+  canvas: HTMLCanvasElement,
+  camera: Parameters<Raycaster['setFromCamera']>[1],
+  scene: Object3D,
+  raycaster: Raycaster,
+  artwork: ArtworkPlacement,
+): Partial<ArtworkDraftState> | null {
+  const targetMeshes = getArtworkTargetMeshes(scene, artwork.targetPartId)
+
+  if (targetMeshes.length === 0) {
+    return null
+  }
+
+  raycaster.setFromCamera(getPointerCoordinates(event, canvas), camera)
+
+  const intersection = raycaster.intersectObjects(targetMeshes, false)[0]
+
+  if (!intersection) {
+    return null
+  }
+
+  return getArtworkTransformFromIntersection(
+    intersection,
+    camera.position,
+    artwork.scale,
+    artwork.rotation,
+    getArtworkAspectRatio(artwork),
+  )
+}
+
 function getPointerCoordinates(
   event: PointerEvent,
   element: HTMLCanvasElement,
@@ -1832,8 +2100,262 @@ function getSelectionThreshold(pointerType: string): number {
     : MOUSE_CLICK_THRESHOLD_PX
 }
 
+function createArtworkMaterial(texture: Texture): MeshStandardMaterial {
+  const material = new MeshStandardMaterial({
+    alphaTest: 0.02,
+    depthTest: true,
+    depthWrite: false,
+    map: texture,
+    metalness: 0,
+    opacity: 1,
+    polygonOffset: true,
+    polygonOffsetFactor: -6,
+    polygonOffsetUnits: -6,
+    roughness: 0.38,
+    side: FrontSide,
+    toneMapped: true,
+    transparent: true,
+  })
+
+  material.name = 'ModifyWrap Artwork Overlay'
+  return material
+}
+
+function getAppliedArtworkPlacements(
+  appliedDesign: AppliedDesignState,
+): ArtworkPlacement[] {
+  return Object.values(appliedDesign.parts).flatMap((partState) => [
+    ...partState.artwork,
+  ])
+}
+
+type ArtworkOverlayItem = {
+  artwork: ArtworkPlacement
+  preview: boolean
+}
+
+function getArtworkOverlayItems(
+  appliedDesign: AppliedDesignState,
+  artworkPreview: ArtworkPreviewState | null,
+): ArtworkOverlayItem[] {
+  const items = getAppliedArtworkPlacements(appliedDesign).map((artwork) => ({
+    artwork,
+    preview: false,
+  }))
+
+  if (artworkPreview?.artwork.imageSource) {
+    items.push({
+      artwork: artworkPreview.artwork,
+      preview: true,
+    })
+  }
+
+  return items
+}
+
+function usePreparedArtworkTexture(
+  artwork: ArtworkPlacement,
+  targetAspectRatio: number,
+): Texture {
+  const sourceTexture = useTexture(artwork.imageSource)
+  const { gl } = useThree()
+
+  const texture = useMemo(() => {
+    const preparedTexture = sourceTexture.clone()
+
+    preparedTexture.anisotropy = Math.min(
+      8,
+      gl.capabilities.getMaxAnisotropy(),
+    )
+    preparedTexture.center.set(0.5, 0.5)
+    preparedTexture.colorSpace = SRGBColorSpace
+    preparedTexture.flipY = artwork.mode !== 'fill'
+    preparedTexture.wrapS = ClampToEdgeWrapping
+    preparedTexture.wrapT = ClampToEdgeWrapping
+
+    if (artwork.mode === 'fill') {
+      const sourceAspectRatio = getArtworkAspectRatio(artwork)
+      const safeTargetAspectRatio =
+        Number.isFinite(targetAspectRatio) && targetAspectRatio > 0
+          ? targetAspectRatio
+          : 1
+      const zoom = Math.max(1, artwork.scale)
+      const baseRepeatX =
+        sourceAspectRatio > safeTargetAspectRatio
+          ? safeTargetAspectRatio / sourceAspectRatio
+          : 1
+      const baseRepeatY =
+        sourceAspectRatio > safeTargetAspectRatio
+          ? 1
+          : sourceAspectRatio / safeTargetAspectRatio
+      const repeatX = Math.min(1, baseRepeatX / zoom)
+      const repeatY = Math.min(1, baseRepeatY / zoom)
+      const offsetX = (artwork.offsetX ?? 0) * (1 - repeatX) * 0.5
+      const offsetY = (artwork.offsetY ?? 0) * (1 - repeatY) * 0.5
+
+      preparedTexture.repeat.set(repeatX, repeatY)
+      preparedTexture.offset.set(
+        0.5 - repeatX / 2 + offsetX,
+        0.5 - repeatY / 2 + offsetY,
+      )
+      preparedTexture.rotation = MathUtils.degToRad(artwork.rotation)
+    }
+
+    preparedTexture.needsUpdate = true
+    return preparedTexture
+  }, [
+    artwork,
+    gl.capabilities,
+    sourceTexture,
+    targetAspectRatio,
+  ])
+
+  useEffect(() => {
+    return () => {
+      texture.dispose()
+    }
+  }, [texture])
+
+  return texture
+}
+
+type ArtworkOverlayProps = {
+  artwork: ArtworkPlacement
+  modelScene: Object3D
+  preview: boolean
+}
+
+function ArtworkOverlay({
+  artwork,
+  modelScene,
+  preview,
+}: ArtworkOverlayProps) {
+  const { camera } = useThree()
+
+  const targetMesh = useMemo(
+    () =>
+      getLargestArtworkMesh(
+        getArtworkTargetMeshes(modelScene, artwork.targetPartId),
+      ),
+    [artwork.targetPartId, modelScene],
+  )
+  const targetAspectRatio = useMemo(
+    () => (targetMesh ? getArtworkTargetAspect(targetMesh) : 1),
+    [targetMesh],
+  )
+  const texture = usePreparedArtworkTexture(artwork, targetAspectRatio)
+
+  const overlay = useMemo(() => {
+    if (!targetMesh) {
+      return null
+    }
+
+    const material = createArtworkMaterial(texture)
+    let overlayMesh: Mesh<BufferGeometry, MeshStandardMaterial>
+
+    if (artwork.mode === 'fill' && targetMesh.geometry.hasAttribute('uv')) {
+      targetMesh.updateWorldMatrix(true, false)
+
+      overlayMesh = new Mesh(targetMesh.geometry.clone(), material)
+      overlayMesh.matrix.copy(targetMesh.matrixWorld)
+      overlayMesh.matrixAutoUpdate = false
+      overlayMesh.frustumCulled = false
+    } else {
+      const fallbackTransform = getDefaultArtworkTransform(
+        targetMesh,
+        camera.position,
+        artwork.scale,
+        artwork.rotation,
+        getArtworkAspectRatio(artwork),
+      )
+      const position =
+        artwork.position ??
+        fallbackTransform?.position ??
+        ([0, 0, 0] as const)
+      const orientation =
+        artwork.orientation ??
+        fallbackTransform?.orientation ??
+        ([0, 0, 0] as const)
+      const size =
+        fallbackTransform?.size ??
+        getArtworkProjectionSize(artwork.scale, getArtworkAspectRatio(artwork))
+
+      overlayMesh = new Mesh(
+        new DecalGeometry(
+          targetMesh,
+          tupleToVector(position),
+          getRotatedArtworkOrientation(orientation, artwork.rotation),
+          tupleToVector(size),
+        ),
+        material,
+      )
+    }
+
+    overlayMesh.name = preview
+      ? `MW_ARTWORK_PREVIEW_${artwork.id}`
+      : `MW_ARTWORK_${artwork.id}`
+    overlayMesh.renderOrder = preview
+      ? ARTWORK_PREVIEW_RENDER_ORDER
+      : ARTWORK_RENDER_ORDER
+    overlayMesh.userData.modifyWrapArtwork = true
+    overlayMesh.raycast = () => undefined
+
+    return overlayMesh
+  }, [
+    artwork,
+    camera.position,
+    preview,
+    targetMesh,
+    texture,
+  ])
+
+  useEffect(() => {
+    return () => {
+      if (!overlay) {
+        return
+      }
+
+      overlay.geometry.dispose()
+      disposeMaterial(overlay.material)
+    }
+  }, [overlay])
+
+  return overlay ? <primitive object={overlay} /> : null
+}
+
+type ArtworkOverlaysProps = {
+  appliedDesign: AppliedDesignState
+  artworkPreview: ArtworkPreviewState | null
+  modelScene: Object3D
+}
+
+function ArtworkOverlays({
+  appliedDesign,
+  artworkPreview,
+  modelScene,
+}: ArtworkOverlaysProps) {
+  const overlayItems = useMemo(
+    () => getArtworkOverlayItems(appliedDesign, artworkPreview),
+    [appliedDesign, artworkPreview],
+  )
+
+  return (
+    <>
+      {overlayItems.map((item) => (
+        <ArtworkOverlay
+          artwork={item.artwork}
+          key={`${item.preview ? 'preview' : 'applied'}-${item.artwork.id}`}
+          modelScene={modelScene}
+          preview={item.preview}
+        />
+      ))}
+    </>
+  )
+}
+
 export function S4Model({
   appliedDesign,
+  artworkPreview,
   caliperPaintPreview,
   chromeDeletePreview,
   controlsRef,
@@ -1842,6 +2364,7 @@ export function S4Model({
   selectedTargetId,
   tintPreview,
   wrapPreview,
+  onArtworkPreviewTransformChange,
   onPartSelect,
   onSelectionClear,
 }: S4ModelProps) {
@@ -1849,6 +2372,12 @@ export function S4Model({
   const plateTexture = useTexture(PLATE_TEXTURE_URL)
   const { camera, gl } = useThree()
   const pointerStartRef = useRef<PointerStart | null>(null)
+  const artworkDragRef = useRef<ArtworkDragState | null>(null)
+  const artworkPreviewRef = useRef<ArtworkPreviewState | null>(artworkPreview)
+  const selectedTargetIdRef = useRef<string | null>(selectedTargetId)
+  const onArtworkPreviewTransformChangeRef = useRef(
+    onArtworkPreviewTransformChange,
+  )
   const raycasterRef = useRef(new Raycaster())
   const activeTouchPointersRef = useRef(new Set<number>())
   const multiTouchGestureRef = useRef(false)
@@ -1884,6 +2413,13 @@ export function S4Model({
   }, [gltf.scene, preparedNativePlateTexture, preparedSurfacePlateTexture])
 
   const modelScene = preparedScene.scene
+
+  useEffect(() => {
+    artworkPreviewRef.current = artworkPreview
+    selectedTargetIdRef.current = selectedTargetId
+    onArtworkPreviewTransformChangeRef.current =
+      onArtworkPreviewTransformChange
+  }, [artworkPreview, onArtworkPreviewTransformChange, selectedTargetId])
 
   const selectedMeshNames = useMemo(
     () => getTargetMeshNames(selectedTargetId),
@@ -1969,6 +2505,44 @@ export function S4Model({
   }, [hoveredMeshNames, modelScene, selectedMeshNames])
 
   useEffect(() => {
+    const artwork = artworkPreview?.artwork
+
+    if (
+      !artwork ||
+      artwork.mode !== 'place' ||
+      !artwork.imageSource ||
+      (artwork.position && artwork.orientation && artwork.size)
+    ) {
+      return
+    }
+
+    const targetMesh = getLargestArtworkMesh(
+      getArtworkTargetMeshes(modelScene, artwork.targetPartId),
+    )
+
+    if (!targetMesh) {
+      return
+    }
+
+    const defaultTransform = getDefaultArtworkTransform(
+      targetMesh,
+      camera.position,
+      artwork.scale,
+      artwork.rotation,
+      getArtworkAspectRatio(artwork),
+    )
+
+    if (defaultTransform) {
+      onArtworkPreviewTransformChange(defaultTransform)
+    }
+  }, [
+    artworkPreview?.artwork,
+    camera.position,
+    modelScene,
+    onArtworkPreviewTransformChange,
+  ])
+
+  useEffect(() => {
     document.body.style.cursor = hoveredPartId ? 'pointer' : ''
 
     return () => {
@@ -1978,6 +2552,51 @@ export function S4Model({
 
   useEffect(() => {
     const canvas = gl.domElement
+
+    function setControlsEnabled(enabled: boolean) {
+      const controls = controlsRef.current
+
+      if (controls) {
+        controls.enabled = enabled
+      }
+    }
+
+    function stopArtworkDrag(event?: PointerEvent) {
+      if (!artworkDragRef.current) {
+        return
+      }
+
+      if (event && canvas.hasPointerCapture(event.pointerId)) {
+        canvas.releasePointerCapture(event.pointerId)
+      }
+
+      artworkDragRef.current = null
+      setControlsEnabled(true)
+    }
+
+    function getActiveArtworkTransform(
+      event: PointerEvent,
+    ): Partial<ArtworkDraftState> | null {
+      const artwork = artworkPreviewRef.current?.artwork
+
+      if (
+        !artwork ||
+        artwork.mode !== 'place' ||
+        !artwork.imageSource ||
+        artwork.targetPartId !== selectedTargetIdRef.current
+      ) {
+        return null
+      }
+
+      return getArtworkTransformFromPointer(
+        event,
+        canvas,
+        camera,
+        modelScene,
+        raycasterRef.current,
+        artwork,
+      )
+    }
 
     function updateTouchPointers(event: PointerEvent, active: boolean) {
       if (event.pointerType !== 'touch') {
@@ -1993,6 +2612,7 @@ export function S4Model({
       if (activeTouchPointersRef.current.size > 1) {
         multiTouchGestureRef.current = true
         pointerStartRef.current = null
+        stopArtworkDrag(event)
       }
     }
 
@@ -2005,6 +2625,20 @@ export function S4Model({
         activeTouchPointersRef.current.size > 1
       ) {
         pointerStartRef.current = null
+        return
+      }
+
+      const artworkTransform = getActiveArtworkTransform(event)
+
+      if (artworkTransform) {
+        artworkDragRef.current = {
+          pointerId: event.pointerId,
+        }
+        pointerStartRef.current = null
+        setControlsEnabled(false)
+        canvas.setPointerCapture(event.pointerId)
+        onArtworkPreviewTransformChangeRef.current(artworkTransform)
+        event.preventDefault()
         return
       }
 
@@ -2021,6 +2655,19 @@ export function S4Model({
     }
 
     function handlePointerMove(event: PointerEvent) {
+      const artworkDrag = artworkDragRef.current
+
+      if (artworkDrag?.pointerId === event.pointerId) {
+        const artworkTransform = getActiveArtworkTransform(event)
+
+        if (artworkTransform) {
+          onArtworkPreviewTransformChangeRef.current(artworkTransform)
+        }
+
+        event.preventDefault()
+        return
+      }
+
       const pointerStart = pointerStartRef.current
 
       if (pointerStart) {
@@ -2048,6 +2695,18 @@ export function S4Model({
     }
 
     function handlePointerUp(event: PointerEvent) {
+      if (artworkDragRef.current?.pointerId === event.pointerId) {
+        updateTouchPointers(event, false)
+        stopArtworkDrag(event)
+
+        if (activeTouchPointersRef.current.size === 0) {
+          multiTouchGestureRef.current = false
+        }
+
+        event.preventDefault()
+        return
+      }
+
       const pointerStart = pointerStartRef.current
       pointerStartRef.current = null
       const wasMultiTouchGesture = multiTouchGestureRef.current
@@ -2101,6 +2760,7 @@ export function S4Model({
 
     function handlePointerCancel(event: PointerEvent) {
       updateTouchPointers(event, false)
+      stopArtworkDrag(event)
       pointerStartRef.current = null
       setHoveredPartId(null)
 
@@ -2110,6 +2770,7 @@ export function S4Model({
     }
 
     function handlePointerLeave() {
+      stopArtworkDrag()
       pointerStartRef.current = null
       setHoveredPartId(null)
     }
@@ -2132,6 +2793,7 @@ export function S4Model({
       canvas.removeEventListener('pointercancel', handlePointerCancel)
       canvas.removeEventListener('pointerleave', handlePointerLeave)
       canvas.removeEventListener('contextmenu', preventContextMenu)
+      stopArtworkDrag()
     }
   }, [
     camera,
@@ -2142,5 +2804,14 @@ export function S4Model({
     onSelectionClear,
   ])
 
-  return <primitive object={modelScene} />
+  return (
+    <>
+      <primitive object={modelScene} />
+      <ArtworkOverlays
+        appliedDesign={appliedDesign}
+        artworkPreview={artworkPreview}
+        modelScene={modelScene}
+      />
+    </>
+  )
 }

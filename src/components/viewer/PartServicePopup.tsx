@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { getService } from '../../config/services'
 import type {
+  ArtworkDraftState,
+  ArtworkMode,
   CaliperPaintConfig,
   CaliperPaintFinish,
   CaliperPaintScope,
@@ -61,10 +63,22 @@ const lightTintShadeOptions = [
 const lightTintShadeDarknessSet = new Set<number>(
   lightTintShadeOptions.map((option) => option.darkness),
 )
+const artworkModeOptions = [
+  { id: 'place', label: 'Place' },
+  { id: 'fill', label: 'Fill Part' },
+] as const satisfies readonly { id: ArtworkMode; label: string }[]
+const supportedArtworkMimeTypes = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+])
+const lowResolutionShortEdgeThreshold = 256
+const lowResolutionLongEdgeThreshold = 600
 
 type PartServicePopupProps = {
   target: VehiclePartDefinition
   selectedServiceId: ServiceId | null
+  artworkConfig: ArtworkDraftState | null
   caliperPaintConfig: CaliperPaintConfig | null
   caliperPaintScope: CaliperPaintScope | null
   caliperPaintScopeOptions: readonly CaliperPaintScopeOption[]
@@ -89,6 +103,8 @@ type PartServicePopupProps = {
   canResetPowderCoat: boolean
   canResetTint: boolean
   canResetWrap: boolean
+  canRemoveArtwork: boolean
+  canRemoveAllArtwork: boolean
   onApply: () => void
   onApplyAll: () => void
   onBack: () => void
@@ -101,7 +117,10 @@ type PartServicePopupProps = {
   onResetPowderCoat: () => void
   onResetTint: () => void
   onResetWrap: () => void
+  onRemoveArtwork: () => void
+  onRemoveAllArtwork: () => void
   onSelectService: (serviceId: ServiceId) => void
+  onUpdateArtworkDraft: (patch: Partial<ArtworkDraftState>) => void
   onUpdateCaliperPaintDraft: (patch: Partial<CaliperPaintConfig>) => void
   onUpdateCaliperPaintScope: (scope: CaliperPaintScope) => void
   onUpdatePowderCoatDraft: (patch: Partial<PowderCoatConfig>) => void
@@ -116,7 +135,10 @@ type PartServicePopupProps = {
 }
 
 export function PartServicePopup({
+  artworkConfig,
   canApplyAllWraps,
+  canRemoveAllArtwork,
+  canRemoveArtwork,
   canResetAllWraps,
   canResetCaliperPaint,
   canResetChromeDelete,
@@ -154,7 +176,10 @@ export function PartServicePopup({
   onResetPowderCoat,
   onResetTint,
   onResetWrap,
+  onRemoveAllArtwork,
+  onRemoveArtwork,
   onSelectService,
+  onUpdateArtworkDraft,
   onUpdateCaliperPaintDraft,
   onUpdateCaliperPaintScope,
   onUpdatePowderCoatDraft,
@@ -186,13 +211,16 @@ export function PartServicePopup({
     selectedServiceId === 'powder-coat' &&
     powderCoatConfig !== null &&
     powderCoatScope !== null
+  const showArtworkEditor =
+    selectedServiceId === 'artwork' && artworkConfig !== null
   const showServiceList =
     !showWrapEditor &&
     !showTintEditor &&
     !showLightTintEditor &&
     !showChromeDeleteEditor &&
     !showCaliperPaintEditor &&
-    !showPowderCoatEditor
+    !showPowderCoatEditor &&
+    !showArtworkEditor
   const syncedHexValue = wrapConfig?.color.toUpperCase() ?? '#C49D59'
   const syncedChromeDeleteHexValue =
     chromeDeleteConfig?.color.toUpperCase() ?? '#050505'
@@ -416,6 +444,111 @@ export function PartServicePopup({
 
     setCustomLightTint({ active: true, source: nextDarkness })
     onUpdateLightTintDraft({ darkness: nextDarkness })
+  }
+
+  function isLowResolutionArtwork(width: number, height: number): boolean {
+    const shortEdge = Math.min(width, height)
+    const longEdge = Math.max(width, height)
+
+    return (
+      shortEdge < lowResolutionShortEdgeThreshold ||
+      longEdge < lowResolutionLongEdgeThreshold
+    )
+  }
+
+  function handleArtworkUpload(fileList: FileList | null) {
+    const file = fileList?.[0]
+
+    if (!file) {
+      return
+    }
+
+    if (!supportedArtworkMimeTypes.has(file.type)) {
+      onUpdateArtworkDraft({
+        imageSource: null,
+        fileName: '',
+        imageWidth: 0,
+        imageHeight: 0,
+        aspectRatio: 1,
+        lowResolution: false,
+        error: 'Unsupported file type',
+      })
+      return
+    }
+
+    const reader = new FileReader()
+
+    reader.onerror = () => {
+      onUpdateArtworkDraft({
+        imageSource: null,
+        fileName: '',
+        imageWidth: 0,
+        imageHeight: 0,
+        aspectRatio: 1,
+        lowResolution: false,
+        error: 'Upload failed',
+      })
+    }
+
+    reader.onload = () => {
+      const imageSource = reader.result
+
+      if (typeof imageSource !== 'string') {
+        onUpdateArtworkDraft({
+          imageSource: null,
+          fileName: '',
+          imageWidth: 0,
+          imageHeight: 0,
+          aspectRatio: 1,
+          lowResolution: false,
+          error: 'Upload failed',
+        })
+        return
+      }
+
+      const image = new Image()
+
+      image.onerror = () => {
+        onUpdateArtworkDraft({
+          imageSource: null,
+          fileName: '',
+          imageWidth: 0,
+          imageHeight: 0,
+          aspectRatio: 1,
+          lowResolution: false,
+          error: 'Upload failed',
+        })
+      }
+
+      image.onload = () => {
+        onUpdateArtworkDraft({
+          imageSource,
+          fileName: file.name,
+          imageWidth: image.naturalWidth,
+          imageHeight: image.naturalHeight,
+          aspectRatio: image.naturalWidth / image.naturalHeight,
+          lowResolution: isLowResolutionArtwork(
+            image.naturalWidth,
+            image.naturalHeight,
+          ),
+          error: null,
+        })
+      }
+
+      image.src = imageSource
+    }
+
+    reader.readAsDataURL(file)
+  }
+
+  function handleArtworkModeSelect(mode: ArtworkMode) {
+    onUpdateArtworkDraft({
+      mode,
+      scale: mode === 'fill' ? 1 : 0.68,
+      rotation: 0,
+      offsetX: 0,
+      offsetY: 0,
+    })
   }
 
   return (
@@ -818,6 +951,193 @@ export function PartServicePopup({
         </div>
       ) : null}
 
+      {showArtworkEditor && artworkConfig ? (
+        <div className="part-popup-wrap" aria-label="Artwork options">
+          <label className="part-popup-field">
+            <span>Upload</span>
+            <input
+              type="file"
+              className="part-popup-file-input"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={(event) =>
+                handleArtworkUpload(event.currentTarget.files)
+              }
+            />
+          </label>
+
+          {artworkConfig.error ? (
+            <p className="part-popup-warning" role="alert">
+              {artworkConfig.error}
+            </p>
+          ) : null}
+
+          {artworkConfig.lowResolution ? (
+            <p className="part-popup-warning">Low Resolution</p>
+          ) : null}
+
+          {artworkConfig.fileName ? (
+            <p className="part-popup-file-name">{artworkConfig.fileName}</p>
+          ) : null}
+
+          <div>
+            <p className="part-popup-finish-label">Mode</p>
+            <div className="part-popup-finish-grid" aria-label="Artwork mode">
+              {artworkModeOptions.map((mode) => (
+                <button
+                  type="button"
+                  className="part-popup-finish"
+                  data-selected={artworkConfig.mode === mode.id}
+                  key={mode.id}
+                  onClick={() => handleArtworkModeSelect(mode.id)}
+                >
+                  {mode.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {artworkConfig.imageSource && artworkConfig.mode === 'place' ? (
+            <>
+              <label className="part-popup-field">
+                <span>Size</span>
+                <div className="part-popup-tint-custom-row">
+                  <input
+                    type="range"
+                    className="part-popup-vlt-input"
+                    min={0.12}
+                    max={2.2}
+                    step={0.02}
+                    value={artworkConfig.scale}
+                    onChange={(event) =>
+                      onUpdateArtworkDraft({
+                        scale: Number(event.currentTarget.value),
+                      })
+                    }
+                  />
+                  <span className="part-popup-color-value">
+                    {artworkConfig.scale.toFixed(2)}
+                  </span>
+                </div>
+              </label>
+
+              <label className="part-popup-field">
+                <span>Rotate</span>
+                <div className="part-popup-tint-custom-row">
+                  <input
+                    type="range"
+                    className="part-popup-vlt-input"
+                    min={-180}
+                    max={180}
+                    step={1}
+                    value={artworkConfig.rotation}
+                    onChange={(event) =>
+                      onUpdateArtworkDraft({
+                        rotation: Number(event.currentTarget.value),
+                      })
+                    }
+                  />
+                  <span className="part-popup-color-value">
+                    {Math.round(artworkConfig.rotation)} deg
+                  </span>
+                </div>
+              </label>
+            </>
+          ) : null}
+
+          {artworkConfig.imageSource && artworkConfig.mode === 'fill' ? (
+            <>
+              <label className="part-popup-field">
+                <span>Scale</span>
+                <div className="part-popup-tint-custom-row">
+                  <input
+                    type="range"
+                    className="part-popup-vlt-input"
+                    min={1}
+                    max={4}
+                    step={0.05}
+                    value={artworkConfig.scale}
+                    onChange={(event) =>
+                      onUpdateArtworkDraft({
+                        scale: Number(event.currentTarget.value),
+                      })
+                    }
+                  />
+                  <span className="part-popup-color-value">
+                    {artworkConfig.scale.toFixed(2)}
+                  </span>
+                </div>
+              </label>
+
+              <label className="part-popup-field">
+                <span>Horizontal offset</span>
+                <div className="part-popup-tint-custom-row">
+                  <input
+                    type="range"
+                    className="part-popup-vlt-input"
+                    min={-1}
+                    max={1}
+                    step={0.01}
+                    value={artworkConfig.offsetX}
+                    onChange={(event) =>
+                      onUpdateArtworkDraft({
+                        offsetX: Number(event.currentTarget.value),
+                      })
+                    }
+                  />
+                  <span className="part-popup-color-value">
+                    {artworkConfig.offsetX.toFixed(2)}
+                  </span>
+                </div>
+              </label>
+
+              <label className="part-popup-field">
+                <span>Vertical offset</span>
+                <div className="part-popup-tint-custom-row">
+                  <input
+                    type="range"
+                    className="part-popup-vlt-input"
+                    min={-1}
+                    max={1}
+                    step={0.01}
+                    value={artworkConfig.offsetY}
+                    onChange={(event) =>
+                      onUpdateArtworkDraft({
+                        offsetY: Number(event.currentTarget.value),
+                      })
+                    }
+                  />
+                  <span className="part-popup-color-value">
+                    {artworkConfig.offsetY.toFixed(2)}
+                  </span>
+                </div>
+              </label>
+
+              <label className="part-popup-field">
+                <span>Rotate</span>
+                <div className="part-popup-tint-custom-row">
+                  <input
+                    type="range"
+                    className="part-popup-vlt-input"
+                    min={-180}
+                    max={180}
+                    step={1}
+                    value={artworkConfig.rotation}
+                    onChange={(event) =>
+                      onUpdateArtworkDraft({
+                        rotation: Number(event.currentTarget.value),
+                      })
+                    }
+                  />
+                  <span className="part-popup-color-value">
+                    {Math.round(artworkConfig.rotation)} deg
+                  </span>
+                </div>
+              </label>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+
       {showServiceList ? (
         <div className="part-popup-services" aria-label="Services">
           {target.services.map((serviceId) => {
@@ -979,6 +1299,41 @@ export function PartServicePopup({
             </button>
           ) : null}
           <button type="button" className="part-popup-apply" onClick={onApply}>
+            Apply
+          </button>
+        </div>
+      ) : showArtworkEditor ? (
+        <div className="part-popup-actions part-popup-actions--wrap">
+          <button type="button" className="part-popup-link" onClick={onBack}>
+            Back
+          </button>
+          <button type="button" className="part-popup-link" onClick={onCancel}>
+            Cancel
+          </button>
+          {canRemoveArtwork ? (
+            <button
+              type="button"
+              className="part-popup-link"
+              onClick={onRemoveArtwork}
+            >
+              Remove
+            </button>
+          ) : null}
+          {canRemoveAllArtwork ? (
+            <button
+              type="button"
+              className="part-popup-link"
+              onClick={onRemoveAllArtwork}
+            >
+              Remove All
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="part-popup-apply"
+            disabled={!artworkConfig?.imageSource}
+            onClick={onApply}
+          >
             Apply
           </button>
         </div>

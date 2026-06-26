@@ -24,6 +24,7 @@ import {
   initialConfiguratorState,
 } from './state/configuratorReducer'
 import type {
+  ArtworkPreviewState,
   CaliperPaintPreviewState,
   ChromeDeletePreviewState,
   LightTintPreviewState,
@@ -203,6 +204,39 @@ function App() {
     }
   }, [configuratorState.draftSelection])
 
+  const artworkPreview = useMemo<ArtworkPreviewState | null>(() => {
+    const draftSelection = configuratorState.draftSelection
+    const artworkConfig = draftSelection?.artworkConfig
+
+    if (
+      draftSelection?.serviceId !== 'artwork' ||
+      !artworkConfig?.imageSource
+    ) {
+      return null
+    }
+
+    return {
+      targetId: draftSelection.targetId,
+      artwork: {
+        id: artworkConfig.id,
+        targetPartId: artworkConfig.targetPartId,
+        mode: artworkConfig.mode,
+        imageSource: artworkConfig.imageSource,
+        fileName: artworkConfig.fileName,
+        imageWidth: artworkConfig.imageWidth,
+        imageHeight: artworkConfig.imageHeight,
+        aspectRatio: artworkConfig.aspectRatio,
+        position: artworkConfig.position,
+        orientation: artworkConfig.orientation,
+        size: artworkConfig.size,
+        scale: artworkConfig.scale,
+        rotation: artworkConfig.rotation,
+        offsetX: artworkConfig.offsetX,
+        offsetY: artworkConfig.offsetY,
+      },
+    }
+  }, [configuratorState.draftSelection])
+
   const hasFullBodyWrapOverrides = FULL_BODY_PART_IDS.some((partId) =>
     Boolean(configuratorState.appliedDesign.parts[partId]?.wrap),
   )
@@ -301,6 +335,13 @@ function App() {
           ),
         )
       : false
+  const activeTargetArtwork = activeTarget
+    ? (configuratorState.appliedDesign.parts[activeTarget.id]?.artwork ?? [])
+    : []
+  const activeArtworkId =
+    configuratorState.draftSelection?.artworkConfig?.selectedArtworkId ??
+    activeTargetArtwork.at(-1)?.id ??
+    null
 
   function handleShellPointerDown(event: PointerEvent<HTMLElement>) {
     if (!configuratorState.draftSelection) {
@@ -361,6 +402,7 @@ function App() {
           </h2>
           <VehicleViewer
             appliedDesign={configuratorState.appliedDesign}
+            artworkPreview={artworkPreview}
             caliperPaintPreview={caliperPaintPreview}
             chromeDeletePreview={chromeDeletePreview}
             lightTintPreview={lightTintPreview}
@@ -369,6 +411,9 @@ function App() {
             selectedTargetId={configuratorState.draftSelection?.targetId ?? null}
             tintPreview={tintPreview}
             wrapPreview={wrapPreview}
+            onArtworkPreviewTransformChange={(patch) =>
+              dispatch({ type: 'update-artwork-draft', patch })
+            }
             onPartSelect={(partId) =>
               dispatch({ type: 'select-target', targetId: partId })
             }
@@ -410,6 +455,9 @@ function App() {
                 configuratorState.draftSelection?.powderCoatScope ?? null
               }
               powderCoatScopeOptions={powderCoatScopeOptions}
+              artworkConfig={
+                configuratorState.draftSelection?.artworkConfig ?? null
+              }
               lightTintConfig={
                 configuratorState.draftSelection?.lightTintConfig ?? null
               }
@@ -432,6 +480,8 @@ function App() {
               canResetPowderCoat={canResetPowderCoat}
               canResetTint={canResetTint}
               canResetWrap={activeTargetHasDirectWrap}
+              canRemoveArtwork={Boolean(activeArtworkId)}
+              canRemoveAllArtwork={activeTargetArtwork.length > 0}
               onApply={() => dispatch({ type: 'apply-draft' })}
               onApplyAll={() => dispatch({ type: 'apply-wrap-all' })}
               onBack={handleBack}
@@ -486,6 +536,21 @@ function App() {
               onResetWrap={() =>
                 dispatch({ type: 'reset-wrap', targetId: activeTarget.id })
               }
+              onRemoveArtwork={() =>
+                activeArtworkId
+                  ? dispatch({
+                      type: 'remove-artwork',
+                      targetId: activeTarget.id,
+                      artworkId: activeArtworkId,
+                    })
+                  : undefined
+              }
+              onRemoveAllArtwork={() =>
+                dispatch({
+                  type: 'remove-all-artwork',
+                  targetId: activeTarget.id,
+                })
+              }
               onSelectService={(serviceId) =>
                 dispatch({ type: 'select-service', serviceId })
               }
@@ -521,6 +586,9 @@ function App() {
               }
               onUpdatePowderCoatScope={(scope) =>
                 dispatch({ type: 'update-powder-coat-scope', scope })
+              }
+              onUpdateArtworkDraft={(patch) =>
+                dispatch({ type: 'update-artwork-draft', patch })
               }
             />
           ) : null}
