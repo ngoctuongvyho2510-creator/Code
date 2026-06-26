@@ -1,4 +1,6 @@
 import type {
+  ChromeDeleteScope,
+  ChromeDeleteScopeOption,
   PartGroup,
   ServiceId,
   SurfaceType,
@@ -56,6 +58,15 @@ export const TINTABLE_GLASS_PART_IDS = [
   'rear-glass',
 ] as const
 
+export const CHROME_DELETE_PART_IDS = [
+  'window-chrome-left',
+  'window-chrome-right',
+  'grille-frame',
+  'lower-chrome-left',
+  'lower-chrome-right',
+  'rear-diffuser-chrome',
+] as const
+
 const FRONT_SIDE_TINT_PART_IDS = [
   'front-window-left',
   'front-window-right',
@@ -77,12 +88,28 @@ const REAR_TINT_PART_IDS = [
   'rear-glass',
 ] as const
 
+const WINDOW_CHROME_DELETE_PART_IDS = [
+  'window-chrome-left',
+  'window-chrome-right',
+] as const
+
+const LOWER_GRILLE_CHROME_DELETE_PART_IDS = [
+  'lower-chrome-left',
+  'lower-chrome-right',
+] as const
+
 const tintScopeLabels = {
   this: 'This',
   pair: 'Pair',
   rear: 'Rear',
   all: 'All',
 } as const satisfies Record<TintScope, string>
+
+const chromeDeleteScopeLabels = {
+  this: 'This',
+  both: 'Both',
+  'all-chrome': 'All Chrome',
+} as const satisfies Record<ChromeDeleteScope, string>
 
 const tintScopesByPartId = {
   windshield: ['this', 'all'],
@@ -107,6 +134,27 @@ const tintPairPartIdsByPartId = {
   'quarter-glass-right': QUARTER_TINT_PART_IDS,
 } as const satisfies Partial<
   Record<(typeof TINTABLE_GLASS_PART_IDS)[number], readonly string[]>
+>
+
+const chromeDeleteScopesByPartId = {
+  'window-chrome-left': ['this', 'both', 'all-chrome'],
+  'window-chrome-right': ['this', 'both', 'all-chrome'],
+  'grille-frame': ['this', 'all-chrome'],
+  'lower-chrome-left': ['this', 'both', 'all-chrome'],
+  'lower-chrome-right': ['this', 'both', 'all-chrome'],
+  'rear-diffuser-chrome': ['this', 'all-chrome'],
+} as const satisfies Record<
+  (typeof CHROME_DELETE_PART_IDS)[number],
+  readonly ChromeDeleteScope[]
+>
+
+const chromeDeleteBothPartIdsByPartId = {
+  'window-chrome-left': WINDOW_CHROME_DELETE_PART_IDS,
+  'window-chrome-right': WINDOW_CHROME_DELETE_PART_IDS,
+  'lower-chrome-left': LOWER_GRILLE_CHROME_DELETE_PART_IDS,
+  'lower-chrome-right': LOWER_GRILLE_CHROME_DELETE_PART_IDS,
+} as const satisfies Partial<
+  Record<(typeof CHROME_DELETE_PART_IDS)[number], readonly string[]>
 >
 
 export const FULL_BODY_MESH_NAMES = [
@@ -195,23 +243,17 @@ export const VEHICLE_PARTS = [
   vehiclePart('door-handle-rear-right', 'Handle RR', ['MW_PART_DOOR_HANDLE_RR'], 'painted-body', PAINTED_BODY_SERVICES, 'body'),
   vehiclePart('shark-fin', 'Shark Fin', ['MW_PART_SHARK_FIN_ANTENNA'], 'painted-body', PAINTED_BODY_SERVICES, 'body'),
 
-  vehiclePart('window-chrome-left', 'Chrome L', ['MW_TRIM_WINDOW_CHROME_L'], 'chrome', CHROME_SERVICES, 'chrome'),
-  vehiclePart('window-chrome-right', 'Chrome R', ['MW_TRIM_WINDOW_CHROME_R'], 'chrome', CHROME_SERVICES, 'chrome'),
-  vehiclePart('grille-frame', 'Grille Trim', ['MW_TRIM_GRILLE_FRAME_FRONT'], 'chrome', CHROME_SERVICES, 'chrome'),
-  vehiclePart('lower-chrome-left', 'Lower Chrome L', ['MW_TRIM_FRONT_LOWER_GRILLE_CHROME_L_01', 'MW_TRIM_FRONT_LOWER_GRILLE_CHROME_L_02'], 'chrome', CHROME_SERVICES, 'chrome'),
-  vehiclePart('lower-chrome-right', 'Lower Chrome R', ['MW_TRIM_FRONT_LOWER_GRILLE_CHROME_R_01', 'MW_TRIM_FRONT_LOWER_GRILLE_CHROME_R_02'], 'chrome', CHROME_SERVICES, 'chrome'),
-  vehiclePart('rear-diffuser-chrome', 'Diffuser Chrome', ['MW_TRIM_REAR_DIFFUSER_CHROME'], 'chrome', CHROME_SERVICES, 'chrome'),
+  vehiclePart('window-chrome-left', 'Window Chrome Left', ['MW_TRIM_WINDOW_CHROME_L', 'MW_TRIM_BODY_SIDE_WINDOW_FRAME_FL', 'MW_TRIM_BODY_SIDE_WINDOW_FRAME_RL', 'MW_TRIM_DOOR_WINDOW_FRAME_FL', 'MW_TRIM_DOOR_WINDOW_FRAME_RL', 'MW_TRIM_QUARTER_WINDOW_FRAME_L'], 'chrome', CHROME_SERVICES, 'chrome'),
+  vehiclePart('window-chrome-right', 'Window Chrome Right', ['MW_TRIM_WINDOW_CHROME_R', 'MW_TRIM_BODY_SIDE_WINDOW_FRAME_FR', 'MW_TRIM_BODY_SIDE_WINDOW_FRAME_RR', 'MW_TRIM_DOOR_WINDOW_FRAME_FR', 'MW_TRIM_DOOR_WINDOW_FRAME_RR', 'MW_TRIM_QUARTER_WINDOW_FRAME_R'], 'chrome', CHROME_SERVICES, 'chrome'),
+  vehiclePart('grille-frame', 'Grille Frame', ['MW_TRIM_GRILLE_FRAME_FRONT'], 'chrome', CHROME_SERVICES, 'chrome'),
+  vehiclePart('lower-chrome-left', 'Lower Grille Chrome Left', ['MW_TRIM_FRONT_LOWER_GRILLE_CHROME_L_01', 'MW_TRIM_FRONT_LOWER_GRILLE_CHROME_L_02'], 'chrome', CHROME_SERVICES, 'chrome'),
+  vehiclePart('lower-chrome-right', 'Lower Grille Chrome Right', ['MW_TRIM_FRONT_LOWER_GRILLE_CHROME_R_01', 'MW_TRIM_FRONT_LOWER_GRILLE_CHROME_R_02'], 'chrome', CHROME_SERVICES, 'chrome'),
+  vehiclePart('rear-diffuser-chrome', 'Rear Diffuser Chrome', ['MW_TRIM_REAR_DIFFUSER_CHROME'], 'chrome', CHROME_SERVICES, 'chrome'),
 
   vehiclePart('b-pillars-left', 'B Pillar L', ['MW_TRIM_B_PILLAR_FL', 'MW_TRIM_B_PILLAR_RL'], 'black-trim', TRIM_SERVICES, 'trim'),
   vehiclePart('b-pillars-right', 'B Pillar R', ['MW_TRIM_B_PILLAR_FR', 'MW_TRIM_B_PILLAR_RR'], 'black-trim', TRIM_SERVICES, 'trim'),
-  vehiclePart('body-window-frame-left', 'Window Frame L', ['MW_TRIM_BODY_SIDE_WINDOW_FRAME_FL', 'MW_TRIM_BODY_SIDE_WINDOW_FRAME_RL'], 'black-trim', TRIM_SERVICES, 'trim'),
-  vehiclePart('body-window-frame-right', 'Window Frame R', ['MW_TRIM_BODY_SIDE_WINDOW_FRAME_FR', 'MW_TRIM_BODY_SIDE_WINDOW_FRAME_RR'], 'black-trim', TRIM_SERVICES, 'trim'),
-  vehiclePart('door-window-frame-left', 'Door Frame L', ['MW_TRIM_DOOR_WINDOW_FRAME_FL', 'MW_TRIM_DOOR_WINDOW_FRAME_RL'], 'black-trim', TRIM_SERVICES, 'trim'),
-  vehiclePart('door-window-frame-right', 'Door Frame R', ['MW_TRIM_DOOR_WINDOW_FRAME_FR', 'MW_TRIM_DOOR_WINDOW_FRAME_RR'], 'black-trim', TRIM_SERVICES, 'trim'),
   vehiclePart('mirror-base-left', 'Mirror Base L', ['MW_TRIM_MIRROR_BASE_L'], 'black-trim', TRIM_SERVICES, 'trim'),
   vehiclePart('mirror-base-right', 'Mirror Base R', ['MW_TRIM_MIRROR_BASE_R'], 'black-trim', TRIM_SERVICES, 'trim'),
-  vehiclePart('quarter-frame-left', 'Quarter Frame L', ['MW_TRIM_QUARTER_WINDOW_FRAME_L'], 'black-trim', TRIM_SERVICES, 'trim'),
-  vehiclePart('quarter-frame-right', 'Quarter Frame R', ['MW_TRIM_QUARTER_WINDOW_FRAME_R'], 'black-trim', TRIM_SERVICES, 'trim'),
   vehiclePart('rear-diffuser', 'Diffuser', ['MW_TRIM_REAR_DIFFUSER_PLASTIC'], 'black-trim', TRIM_SERVICES, 'trim'),
   vehiclePart('rear-applique-left', 'Applique L', ['MW_TRIM_REAR_DOOR_QUARTER_APPLIQUE_RL'], 'black-trim', TRIM_SERVICES, 'trim'),
   vehiclePart('rear-applique-right', 'Applique R', ['MW_TRIM_REAR_DOOR_QUARTER_APPLIQUE_RR'], 'black-trim', TRIM_SERVICES, 'trim'),
@@ -307,6 +349,69 @@ export const WRAP_CAPABLE_MESH_NAMES = VEHICLE_PARTS.filter(
 export const TINTABLE_GLASS_MESH_NAMES = TINTABLE_GLASS_PART_IDS.flatMap(
   (partId) => partById.get(partId)?.meshNames ?? [],
 )
+
+export const CHROME_DELETE_MESH_NAMES = CHROME_DELETE_PART_IDS.flatMap(
+  (partId) => partById.get(partId)?.meshNames ?? [],
+)
+
+export function isChromeDeleteTarget(targetId: string): boolean {
+  return CHROME_DELETE_PART_IDS.includes(
+    targetId as (typeof CHROME_DELETE_PART_IDS)[number],
+  )
+}
+
+export function getDefaultChromeDeleteScope(
+  targetId: string,
+): ChromeDeleteScope | null {
+  return getChromeDeleteScopeOptions(targetId)[0]?.id ?? null
+}
+
+export function getChromeDeleteScopeOptions(
+  targetId: string,
+): readonly ChromeDeleteScopeOption[] {
+  if (!isChromeDeleteTarget(targetId)) {
+    return []
+  }
+
+  const partId = targetId as (typeof CHROME_DELETE_PART_IDS)[number]
+
+  return chromeDeleteScopesByPartId[partId].map((scope) => ({
+    id: scope,
+    label: chromeDeleteScopeLabels[scope],
+  }))
+}
+
+export function resolveChromeDeleteScopeTargetIds(
+  targetId: string,
+  scope: ChromeDeleteScope,
+): readonly string[] {
+  if (!isChromeDeleteTarget(targetId)) {
+    return []
+  }
+
+  const validScopes = chromeDeleteScopesByPartId[
+    targetId as (typeof CHROME_DELETE_PART_IDS)[number]
+  ]
+
+  if (!(validScopes as readonly ChromeDeleteScope[]).includes(scope)) {
+    return []
+  }
+
+  if (scope === 'this') {
+    return [targetId]
+  }
+
+  if (scope === 'all-chrome') {
+    return CHROME_DELETE_PART_IDS
+  }
+
+  const bothIds =
+    chromeDeleteBothPartIdsByPartId[
+      targetId as keyof typeof chromeDeleteBothPartIdsByPartId
+    ]
+
+  return bothIds ?? []
+}
 
 export function isTintableGlassTarget(targetId: string): boolean {
   return TINTABLE_GLASS_PART_IDS.includes(

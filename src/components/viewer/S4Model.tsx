@@ -26,6 +26,7 @@ import {
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import {
+  CHROME_DELETE_MESH_NAMES,
   FULL_BODY_MESH_NAMES,
   FULL_BODY_TARGET_ID,
   getSelectablePartByMeshName,
@@ -36,8 +37,12 @@ import {
 } from '../../config/vehicleParts'
 import type {
   AppliedDesignState,
+  ChromeDeleteConfig,
+  ChromeDeleteFinish,
+  ChromeDeletePreviewState,
   TintConfig,
   TintPreviewState,
+  VehiclePartDefinition,
   WrapConfig,
   WrapFinish,
   WrapPreviewState,
@@ -58,6 +63,7 @@ type ModelMesh = Mesh<BufferGeometry, Material | Material[], Object3DEventMap>
 
 type PreparedModelScene = {
   fallbackPlateSurfaceNames: string[]
+  foundChromeDeleteMeshNames: Set<string>
   foundTintableMeshNames: Set<string>
   foundWrapCapableMeshNames: Set<string>
   nativePlateMeshNames: Set<string>
@@ -89,6 +95,7 @@ type PointerStart = {
 type S4ModelProps = {
   appliedDesign: AppliedDesignState
   controlsRef: RefObject<OrbitControlsImpl | null>
+  chromeDeletePreview: ChromeDeletePreviewState | null
   selectedTargetId: string | null
   tintPreview: TintPreviewState | null
   wrapPreview: WrapPreviewState | null
@@ -97,12 +104,42 @@ type S4ModelProps = {
 }
 
 const inspectedScenes = new WeakSet<Object3D>()
+const inspectedChromeDeleteMeshScenes = new WeakSet<Object3D>()
 const inspectedTintableMeshScenes = new WeakSet<Object3D>()
 const inspectedWrapMeshScenes = new WeakSet<Object3D>()
 const plateMeshNames = new Set<string>(LICENSE_PLATE_MESH_NAMES)
+const chromeDeleteMeshNames = new Set<string>(CHROME_DELETE_MESH_NAMES)
 const tintableMeshNames = new Set<string>(TINTABLE_GLASS_MESH_NAMES)
 const fullBodyMeshNames = new Set<string>(FULL_BODY_MESH_NAMES)
 const wrapCapableMeshNames = new Set<string>(WRAP_CAPABLE_MESH_NAMES)
+const factoryChromeSideWindowTrimMeshNames = new Set<string>([
+  'MW_TRIM_WINDOW_CHROME_L',
+  'MW_TRIM_WINDOW_CHROME_R',
+  'MW_TRIM_BODY_SIDE_WINDOW_FRAME_FL',
+  'MW_TRIM_BODY_SIDE_WINDOW_FRAME_FR',
+  'MW_TRIM_BODY_SIDE_WINDOW_FRAME_RL',
+  'MW_TRIM_BODY_SIDE_WINDOW_FRAME_RR',
+  'MW_TRIM_DOOR_WINDOW_FRAME_FL',
+  'MW_TRIM_DOOR_WINDOW_FRAME_FR',
+  'MW_TRIM_DOOR_WINDOW_FRAME_RL',
+  'MW_TRIM_DOOR_WINDOW_FRAME_RR',
+  'MW_TRIM_QUARTER_WINDOW_FRAME_L',
+  'MW_TRIM_QUARTER_WINDOW_FRAME_R',
+])
+const cleanBlackExteriorTrimMeshNames = new Set<string>([
+  'MW_TRIM_B_PILLAR_FL',
+  'MW_TRIM_B_PILLAR_FR',
+  'MW_TRIM_B_PILLAR_RL',
+  'MW_TRIM_B_PILLAR_RR',
+  'MW_INTERIOR_REAR_DOOR_QUARTER_WINDOW_TRIM_RL',
+  'MW_INTERIOR_REAR_DOOR_QUARTER_WINDOW_TRIM_RR',
+  'MW_TRIM_REAR_DOOR_QUARTER_APPLIQUE_RL',
+  'MW_TRIM_REAR_DOOR_QUARTER_APPLIQUE_RR',
+  'MW_TRIM_SAIL_PANEL_L',
+  'MW_TRIM_SAIL_PANEL_R',
+  'MW_TRIM_WINDSHIELD_SIDE_MOLDING_L',
+  'MW_TRIM_WINDSHIELD_SIDE_MOLDING_R',
+])
 const plateMaterialNamePattern = /^LicPlate_/i
 const factoryPaintMaterialName = 'carpaint'
 
@@ -113,6 +150,26 @@ const cleanFactoryPaintSettings = {
   metalness: 0.02,
   reflectivity: 0.56,
   roughness: 0.24,
+} as const
+
+const cleanFactoryChromeTrimSettings = {
+  clearcoat: 0.64,
+  clearcoatRoughness: 0.04,
+  color: '#f0eee7',
+  envMapIntensity: 1.68,
+  metalness: 1,
+  reflectivity: 0.9,
+  roughness: 0.08,
+} as const
+
+const cleanBlackExteriorTrimSettings = {
+  clearcoat: 0.18,
+  clearcoatRoughness: 0.34,
+  color: '#030303',
+  envMapIntensity: 0.78,
+  metalness: 0,
+  reflectivity: 0.26,
+  roughness: 0.5,
 } as const
 
 const wrapFinishSettings = {
@@ -139,6 +196,39 @@ const wrapFinishSettings = {
   },
 } as const satisfies Record<
   WrapFinish,
+  {
+    clearcoat: number
+    clearcoatRoughness: number
+    envMapIntensity: number
+    reflectivity: number
+    roughness: number
+  }
+>
+
+const chromeDeleteFinishSettings = {
+  gloss: {
+    clearcoat: 0.72,
+    clearcoatRoughness: 0.08,
+    envMapIntensity: 1.18,
+    reflectivity: 0.5,
+    roughness: 0.2,
+  },
+  satin: {
+    clearcoat: 0.34,
+    clearcoatRoughness: 0.28,
+    envMapIntensity: 0.95,
+    reflectivity: 0.38,
+    roughness: 0.48,
+  },
+  matte: {
+    clearcoat: 0.06,
+    clearcoatRoughness: 0.65,
+    envMapIntensity: 0.72,
+    reflectivity: 0.24,
+    roughness: 0.78,
+  },
+} as const satisfies Record<
+  ChromeDeleteFinish,
   {
     clearcoat: number
     clearcoatRoughness: number
@@ -243,6 +333,56 @@ function createCleanFactoryPaintMaterial(
   return runtimeMaterial
 }
 
+function createCleanFactoryChromeTrimMaterial(
+  material: MeshStandardMaterial,
+): MeshPhysicalMaterial {
+  const runtimeMaterial = new MeshPhysicalMaterial()
+
+  runtimeMaterial.name = material.name
+  runtimeMaterial.color.set(cleanFactoryChromeTrimSettings.color)
+  runtimeMaterial.emissive.set(0, 0, 0)
+  runtimeMaterial.emissiveIntensity = 0
+  runtimeMaterial.envMap = material.envMap
+  runtimeMaterial.envMapIntensity =
+    cleanFactoryChromeTrimSettings.envMapIntensity
+  runtimeMaterial.metalness = cleanFactoryChromeTrimSettings.metalness
+  runtimeMaterial.roughness = cleanFactoryChromeTrimSettings.roughness
+  runtimeMaterial.clearcoat = cleanFactoryChromeTrimSettings.clearcoat
+  runtimeMaterial.clearcoatRoughness =
+    cleanFactoryChromeTrimSettings.clearcoatRoughness
+  runtimeMaterial.reflectivity = cleanFactoryChromeTrimSettings.reflectivity
+
+  clearStandardMaterialTextureInputs(runtimeMaterial)
+  applySmoothOpaqueSurfaceDefaults(runtimeMaterial)
+
+  return runtimeMaterial
+}
+
+function createCleanBlackExteriorTrimMaterial(
+  material: MeshStandardMaterial,
+): MeshPhysicalMaterial {
+  const runtimeMaterial = new MeshPhysicalMaterial()
+
+  runtimeMaterial.name = material.name
+  runtimeMaterial.color.set(cleanBlackExteriorTrimSettings.color)
+  runtimeMaterial.emissive.set(0, 0, 0)
+  runtimeMaterial.emissiveIntensity = 0
+  runtimeMaterial.envMap = material.envMap
+  runtimeMaterial.envMapIntensity =
+    cleanBlackExteriorTrimSettings.envMapIntensity
+  runtimeMaterial.metalness = cleanBlackExteriorTrimSettings.metalness
+  runtimeMaterial.roughness = cleanBlackExteriorTrimSettings.roughness
+  runtimeMaterial.clearcoat = cleanBlackExteriorTrimSettings.clearcoat
+  runtimeMaterial.clearcoatRoughness =
+    cleanBlackExteriorTrimSettings.clearcoatRoughness
+  runtimeMaterial.reflectivity = cleanBlackExteriorTrimSettings.reflectivity
+
+  clearStandardMaterialTextureInputs(runtimeMaterial)
+  applySmoothOpaqueSurfaceDefaults(runtimeMaterial)
+
+  return runtimeMaterial
+}
+
 function isFactoryPaintMaterial(material: Material): material is MeshStandardMaterial {
   return (
     material instanceof MeshStandardMaterial &&
@@ -254,12 +394,29 @@ function createRuntimeMaterial(
   material: Material,
   wrapCapable: boolean,
   tintCapable: boolean,
+  chromeDeleteCapable: boolean,
+  cleanFactoryChromeSideWindowTrim: boolean,
+  cleanBlackExteriorTrim: boolean,
 ): Material {
   if (wrapCapable && isFactoryPaintMaterial(material)) {
     return createCleanFactoryPaintMaterial(material)
   }
 
-  if ((wrapCapable || tintCapable) && material instanceof MeshStandardMaterial) {
+  if (
+    cleanFactoryChromeSideWindowTrim &&
+    material instanceof MeshStandardMaterial
+  ) {
+    return createCleanFactoryChromeTrimMaterial(material)
+  }
+
+  if (cleanBlackExteriorTrim && material instanceof MeshStandardMaterial) {
+    return createCleanBlackExteriorTrimMaterial(material)
+  }
+
+  if (
+    (wrapCapable || tintCapable || chromeDeleteCapable) &&
+    material instanceof MeshStandardMaterial
+  ) {
     const runtimeMaterial = new MeshPhysicalMaterial()
 
     if (material instanceof MeshPhysicalMaterial) {
@@ -286,14 +443,31 @@ function createRuntimeMaterials(
   material: Material | Material[],
   wrapCapable: boolean,
   tintCapable: boolean,
+  chromeDeleteCapable: boolean,
+  cleanFactoryChromeSideWindowTrim: boolean,
+  cleanBlackExteriorTrim: boolean,
 ): Material | Material[] {
   if (Array.isArray(material)) {
     return material.map((item) =>
-      createRuntimeMaterial(item, wrapCapable, tintCapable),
+      createRuntimeMaterial(
+        item,
+        wrapCapable,
+        tintCapable,
+        chromeDeleteCapable,
+        cleanFactoryChromeSideWindowTrim,
+        cleanBlackExteriorTrim,
+      ),
     )
   }
 
-  return createRuntimeMaterial(material, wrapCapable, tintCapable)
+  return createRuntimeMaterial(
+    material,
+    wrapCapable,
+    tintCapable,
+    chromeDeleteCapable,
+    cleanFactoryChromeSideWindowTrim,
+    cleanBlackExteriorTrim,
+  )
 }
 
 function getMaterialNames(material: Material | Material[]): string {
@@ -437,6 +611,7 @@ function prepareModelScene(
   surfacePlateTexture: Texture,
 ): PreparedModelScene {
   const fallbackPlateSurfaceNames: string[] = []
+  const foundChromeDeleteMeshNames = new Set<string>()
   const foundTintableMeshNames = new Set<string>()
   const foundWrapCapableMeshNames = new Set<string>()
   const nativePlateMeshNames = new Set<string>()
@@ -461,9 +636,19 @@ function prepareModelScene(
 
     const wrapCapable = wrapCapableMeshNames.has(object.name)
     const tintCapable = tintableMeshNames.has(object.name)
+    const chromeDeleteCapable = chromeDeleteMeshNames.has(object.name)
+    const cleanFactoryChromeSideWindowTrim =
+      factoryChromeSideWindowTrimMeshNames.has(object.name)
+    const cleanBlackExteriorTrim = cleanBlackExteriorTrimMeshNames.has(
+      object.name,
+    )
 
     if (wrapCapable) {
       foundWrapCapableMeshNames.add(object.name)
+    }
+
+    if (chromeDeleteCapable) {
+      foundChromeDeleteMeshNames.add(object.name)
     }
 
     if (tintCapable) {
@@ -478,6 +663,9 @@ function prepareModelScene(
         object.material,
         wrapCapable,
         tintCapable,
+        chromeDeleteCapable,
+        cleanFactoryChromeSideWindowTrim,
+        cleanBlackExteriorTrim,
       )
     }
 
@@ -497,6 +685,7 @@ function prepareModelScene(
 
   return {
     fallbackPlateSurfaceNames,
+    foundChromeDeleteMeshNames,
     foundTintableMeshNames,
     foundWrapCapableMeshNames,
     nativePlateMeshNames,
@@ -653,6 +842,29 @@ function logMissingTintableMeshes(preparedScene: PreparedModelScene) {
   }
 
   console.warn('Registered tintable glass meshes not found in Mahir S4.glb')
+  console.table(missingMeshNames)
+}
+
+function logMissingChromeDeleteMeshes(preparedScene: PreparedModelScene) {
+  if (
+    !import.meta.env.DEV ||
+    inspectedChromeDeleteMeshScenes.has(preparedScene.scene)
+  ) {
+    return
+  }
+
+  inspectedChromeDeleteMeshScenes.add(preparedScene.scene)
+
+  const missingMeshNames = CHROME_DELETE_MESH_NAMES.filter(
+    (meshName) => !preparedScene.foundChromeDeleteMeshNames.has(meshName),
+  )
+
+  if (missingMeshNames.length === 0) {
+    console.info('All registered chrome-delete meshes were found in Mahir S4.glb.')
+    return
+  }
+
+  console.warn('Registered chrome-delete meshes not found in Mahir S4.glb')
   console.table(missingMeshNames)
 }
 
@@ -891,14 +1103,104 @@ function applyTintMaterials(
   })
 }
 
-function resolveSelectablePartId(object: Object3D): string | null {
+function applyChromeDeleteToMaterial(
+  material: Material,
+  chromeDelete: ChromeDeleteConfig,
+) {
+  if (!(material instanceof MeshStandardMaterial)) {
+    return
+  }
+
+  const settings = chromeDeleteFinishSettings[chromeDelete.finish]
+
+  clearStandardMaterialTextureInputs(material)
+  applySmoothOpaqueSurfaceDefaults(material)
+
+  material.color.setStyle(chromeDelete.color, SRGBColorSpace)
+  material.emissive.set(0, 0, 0)
+  material.emissiveIntensity = 0
+  material.metalness = 0.02
+  material.roughness = settings.roughness
+  material.envMapIntensity = settings.envMapIntensity
+
+  if (material instanceof MeshPhysicalMaterial) {
+    material.clearcoat = settings.clearcoat
+    material.clearcoatRoughness = settings.clearcoatRoughness
+    material.reflectivity = settings.reflectivity
+    material.transmission = 0
+    material.thickness = 0
+  }
+
+  material.needsUpdate = true
+}
+
+function applyChromeDeleteToMesh(
+  mesh: ModelMesh,
+  chromeDelete: ChromeDeleteConfig,
+) {
+  for (const material of getMaterials(mesh.material)) {
+    applyChromeDeleteToMaterial(material, chromeDelete)
+  }
+}
+
+function getEffectiveChromeDeleteForMesh(
+  meshName: string,
+  appliedDesign: AppliedDesignState,
+  chromeDeletePreview: ChromeDeletePreviewState | null,
+  previewTargetIds: Set<string>,
+): ChromeDeleteConfig | null {
+  if (!chromeDeleteMeshNames.has(meshName)) {
+    return null
+  }
+
+  const part = getSelectablePartByMeshName(meshName)
+
+  if (!part?.services.includes('chrome-delete')) {
+    return null
+  }
+
+  if (chromeDeletePreview && previewTargetIds.has(part.id)) {
+    return chromeDeletePreview.chromeDelete
+  }
+
+  return appliedDesign.parts[part.id]?.chromeDelete ?? null
+}
+
+function applyChromeDeleteMaterials(
+  preparedScene: PreparedModelScene,
+  appliedDesign: AppliedDesignState,
+  chromeDeletePreview: ChromeDeletePreviewState | null,
+) {
+  const previewTargetIds = new Set(chromeDeletePreview?.targetIds ?? [])
+
+  preparedScene.scene.traverse((object) => {
+    if (!isModelMesh(object) || !chromeDeleteMeshNames.has(object.name)) {
+      return
+    }
+
+    resetMeshMaterialToFactory(object, preparedScene)
+
+    const chromeDelete = getEffectiveChromeDeleteForMesh(
+      object.name,
+      appliedDesign,
+      chromeDeletePreview,
+      previewTargetIds,
+    )
+
+    if (chromeDelete) {
+      applyChromeDeleteToMesh(object, chromeDelete)
+    }
+  })
+}
+
+function resolveSelectablePart(object: Object3D): VehiclePartDefinition | null {
   let current: Object3D | null = object
 
   while (current) {
     const part = current.name ? getSelectablePartByMeshName(current.name) : null
 
     if (part) {
-      return part.id
+      return part
     }
 
     current = current.parent
@@ -937,17 +1239,28 @@ function getPartIdFromPointer(
   raycaster.setFromCamera(getPointerCoordinates(event, canvas), camera)
 
   const intersections = raycaster.intersectObject(scene, true)
+  let firstPart: VehiclePartDefinition | null = null
 
   for (const intersection of intersections) {
     if (isOutlineObject(intersection.object)) {
       continue
     }
 
-    const partId = resolveSelectablePartId(intersection.object)
+    const part = resolveSelectablePart(intersection.object)
 
-    if (partId) {
-      return partId
+    if (!part) {
+      continue
     }
+
+    firstPart ??= part
+
+    if (part.services.includes('chrome-delete')) {
+      return part.id
+    }
+  }
+
+  if (firstPart) {
+    return firstPart.id
   }
 
   return null
@@ -1011,6 +1324,7 @@ function getSelectionThreshold(pointerType: string): number {
 
 export function S4Model({
   appliedDesign,
+  chromeDeletePreview,
   controlsRef,
   selectedTargetId,
   tintPreview,
@@ -1086,12 +1400,24 @@ export function S4Model({
   }, [preparedScene])
 
   useEffect(() => {
+    logMissingChromeDeleteMeshes(preparedScene)
+  }, [preparedScene])
+
+  useEffect(() => {
     applyWrapMaterials(preparedScene, appliedDesign, wrapPreview)
   }, [appliedDesign, preparedScene, wrapPreview])
 
   useEffect(() => {
     applyTintMaterials(preparedScene, appliedDesign, tintPreview)
   }, [appliedDesign, preparedScene, tintPreview])
+
+  useEffect(() => {
+    applyChromeDeleteMaterials(
+      preparedScene,
+      appliedDesign,
+      chromeDeletePreview,
+    )
+  }, [appliedDesign, chromeDeletePreview, preparedScene])
 
   useEffect(() => {
     applyOutlines(modelScene, selectedMeshNames, hoveredMeshNames)

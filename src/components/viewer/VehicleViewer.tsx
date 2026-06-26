@@ -14,6 +14,7 @@ import { S4Model } from './S4Model'
 import { ViewerErrorBoundary } from './ViewerErrorBoundary'
 import type {
   AppliedDesignState,
+  ChromeDeletePreviewState,
   TintPreviewState,
   WrapPreviewState,
 } from '../../types/configurator'
@@ -29,6 +30,7 @@ export type VehicleViewerHandle = {
 
 type VehicleViewerProps = {
   appliedDesign: AppliedDesignState
+  chromeDeletePreview: ChromeDeletePreviewState | null
   selectedTargetId: string | null
   tintPreview: TintPreviewState | null
   wrapPreview: WrapPreviewState | null
@@ -127,6 +129,7 @@ function InitialViewState({ controlsRef, onResetReady }: InitialViewStateProps) 
 
 type ViewerSceneProps = {
   appliedDesign: AppliedDesignState
+  chromeDeletePreview: ChromeDeletePreviewState | null
   onResetReady: (resetView: () => void) => void
   onPartSelect: (partId: string) => void
   onScenePointerMissed: () => void
@@ -137,6 +140,7 @@ type ViewerSceneProps = {
 
 function ViewerScene({
   appliedDesign,
+  chromeDeletePreview,
   onPartSelect,
   onResetReady,
   onScenePointerMissed,
@@ -177,6 +181,7 @@ function ViewerScene({
           <InitialViewState controlsRef={controlsRef} onResetReady={onResetReady} />
           <S4Model
             appliedDesign={appliedDesign}
+            chromeDeletePreview={chromeDeletePreview}
             controlsRef={controlsRef}
             selectedTargetId={selectedTargetId}
             tintPreview={tintPreview}
@@ -194,6 +199,7 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
   function VehicleViewer(
     {
       appliedDesign,
+      chromeDeletePreview,
       onPartSelect,
       onScenePointerMissed,
       selectedTargetId,
@@ -240,6 +246,7 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
         >
           <ViewerScene
             appliedDesign={appliedDesign}
+            chromeDeletePreview={chromeDeletePreview}
             selectedTargetId={selectedTargetId}
             tintPreview={tintPreview}
             wrapPreview={wrapPreview}

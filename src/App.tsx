@@ -2,8 +2,10 @@ import { useMemo, useReducer, useRef, type PointerEvent } from 'react'
 import {
   FULL_BODY_PART_IDS,
   FULL_BODY_TARGET_ID,
+  getChromeDeleteScopeOptions,
   getTintScopeOptions,
   getSelectionTarget,
+  resolveChromeDeleteScopeTargetIds,
   resolveTintScopeTargetIds,
 } from './config/vehicleParts'
 import { PartServicePopup } from './components/viewer/PartServicePopup'
@@ -16,6 +18,7 @@ import {
   initialConfiguratorState,
 } from './state/configuratorReducer'
 import type { TintPreviewState, WrapPreviewState } from './types/configurator'
+import type { ChromeDeletePreviewState } from './types/configurator'
 import './App.css'
 
 const viewerControls = [
@@ -84,6 +87,32 @@ function App() {
     }
   }, [configuratorState.draftSelection])
 
+  const chromeDeletePreview = useMemo<ChromeDeletePreviewState | null>(() => {
+    const draftSelection = configuratorState.draftSelection
+
+    if (
+      draftSelection?.serviceId !== 'chrome-delete' ||
+      !draftSelection.chromeDeleteConfig ||
+      !draftSelection.chromeDeleteScope
+    ) {
+      return null
+    }
+
+    const targetIds = resolveChromeDeleteScopeTargetIds(
+      draftSelection.targetId,
+      draftSelection.chromeDeleteScope,
+    )
+
+    if (targetIds.length === 0) {
+      return null
+    }
+
+    return {
+      targetIds,
+      chromeDelete: draftSelection.chromeDeleteConfig,
+    }
+  }, [configuratorState.draftSelection])
+
   const hasFullBodyWrapOverrides = FULL_BODY_PART_IDS.some((partId) =>
     Boolean(configuratorState.appliedDesign.parts[partId]?.wrap),
   )
@@ -105,11 +134,29 @@ function App() {
   const tintScopeOptions = activeTarget
     ? getTintScopeOptions(activeTarget.id)
     : []
+  const activeChromeDeleteScope =
+    configuratorState.draftSelection?.serviceId === 'chrome-delete'
+      ? configuratorState.draftSelection.chromeDeleteScope
+      : null
+  const chromeDeleteScopeOptions = activeTarget
+    ? getChromeDeleteScopeOptions(activeTarget.id)
+    : []
   const canResetTint =
     activeTarget && activeTintScope
       ? resolveTintScopeTargetIds(activeTarget.id, activeTintScope).some(
           (targetId) =>
             Boolean(configuratorState.appliedDesign.parts[targetId]?.tint),
+        )
+      : false
+  const canResetChromeDelete =
+    activeTarget && activeChromeDeleteScope
+      ? resolveChromeDeleteScopeTargetIds(
+          activeTarget.id,
+          activeChromeDeleteScope,
+        ).some((targetId) =>
+          Boolean(
+            configuratorState.appliedDesign.parts[targetId]?.chromeDelete,
+          ),
         )
       : false
 
@@ -172,6 +219,7 @@ function App() {
           </h2>
           <VehicleViewer
             appliedDesign={configuratorState.appliedDesign}
+            chromeDeletePreview={chromeDeletePreview}
             ref={vehicleViewerRef}
             selectedTargetId={configuratorState.draftSelection?.targetId ?? null}
             tintPreview={tintPreview}
@@ -196,6 +244,13 @@ function App() {
               selectedServiceId={
                 configuratorState.draftSelection?.serviceId ?? null
               }
+              chromeDeleteConfig={
+                configuratorState.draftSelection?.chromeDeleteConfig ?? null
+              }
+              chromeDeleteScope={
+                configuratorState.draftSelection?.chromeDeleteScope ?? null
+              }
+              chromeDeleteScopeOptions={chromeDeleteScopeOptions}
               wrapConfig={configuratorState.draftSelection?.wrapConfig ?? null}
               tintConfig={configuratorState.draftSelection?.tintConfig ?? null}
               tintScope={configuratorState.draftSelection?.tintScope ?? null}
@@ -205,6 +260,7 @@ function App() {
                 hasFullBodyWrapOverrides
               }
               canResetAllWraps={canResetAllWraps}
+              canResetChromeDelete={canResetChromeDelete}
               canResetTint={canResetTint}
               canResetWrap={activeTargetHasDirectWrap}
               onApply={() => dispatch({ type: 'apply-draft' })}
@@ -213,6 +269,15 @@ function App() {
               onCancel={() => dispatch({ type: 'cancel-draft' })}
               onClose={() => dispatch({ type: 'cancel-draft' })}
               onResetAllWraps={() => dispatch({ type: 'reset-all-wraps' })}
+              onResetChromeDelete={() =>
+                activeChromeDeleteScope
+                  ? dispatch({
+                      type: 'reset-chrome-delete',
+                      targetId: activeTarget.id,
+                      scope: activeChromeDeleteScope,
+                    })
+                  : undefined
+              }
               onResetTint={() =>
                 activeTintScope
                   ? dispatch({
@@ -236,6 +301,12 @@ function App() {
               }
               onUpdateTintScope={(scope) =>
                 dispatch({ type: 'update-tint-scope', scope })
+              }
+              onUpdateChromeDeleteDraft={(patch) =>
+                dispatch({ type: 'update-chrome-delete-draft', patch })
+              }
+              onUpdateChromeDeleteScope={(scope) =>
+                dispatch({ type: 'update-chrome-delete-scope', scope })
               }
             />
           ) : null}
