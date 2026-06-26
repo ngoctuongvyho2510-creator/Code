@@ -9,6 +9,9 @@ import type {
   ChromeDeleteFinish,
   ChromeDeleteScope,
   ChromeDeleteScopeOption,
+  LightTintConfig,
+  LightTintScope,
+  LightTintScopeOption,
   PowderCoatConfig,
   PowderCoatFinish,
   PowderCoatScope,
@@ -50,6 +53,14 @@ const validHexColorPattern = /^#[0-9A-F]{6}$/
 const partialHexColorPattern = /^#[0-9A-F]{0,6}$/
 const tintShadeOptions = [70, 50, 35, 20, 5] as const
 const tintShadeOptionSet = new Set<number>(tintShadeOptions)
+const lightTintShadeOptions = [
+  { label: 'Light', darkness: 25 },
+  { label: 'Medium', darkness: 55 },
+  { label: 'Dark', darkness: 82 },
+] as const
+const lightTintShadeDarknessSet = new Set<number>(
+  lightTintShadeOptions.map((option) => option.darkness),
+)
 
 type PartServicePopupProps = {
   target: VehiclePartDefinition
@@ -60,6 +71,9 @@ type PartServicePopupProps = {
   powderCoatConfig: PowderCoatConfig | null
   powderCoatScope: PowderCoatScope | null
   powderCoatScopeOptions: readonly PowderCoatScopeOption[]
+  lightTintConfig: LightTintConfig | null
+  lightTintScope: LightTintScope | null
+  lightTintScopeOptions: readonly LightTintScopeOption[]
   chromeDeleteConfig: ChromeDeleteConfig | null
   chromeDeleteScope: ChromeDeleteScope | null
   chromeDeleteScopeOptions: readonly ChromeDeleteScopeOption[]
@@ -71,6 +85,7 @@ type PartServicePopupProps = {
   canResetAllWraps: boolean
   canResetCaliperPaint: boolean
   canResetChromeDelete: boolean
+  canResetLightTint: boolean
   canResetPowderCoat: boolean
   canResetTint: boolean
   canResetWrap: boolean
@@ -82,6 +97,7 @@ type PartServicePopupProps = {
   onResetAllWraps: () => void
   onResetCaliperPaint: () => void
   onResetChromeDelete: () => void
+  onResetLightTint: () => void
   onResetPowderCoat: () => void
   onResetTint: () => void
   onResetWrap: () => void
@@ -90,6 +106,8 @@ type PartServicePopupProps = {
   onUpdateCaliperPaintScope: (scope: CaliperPaintScope) => void
   onUpdatePowderCoatDraft: (patch: Partial<PowderCoatConfig>) => void
   onUpdatePowderCoatScope: (scope: PowderCoatScope) => void
+  onUpdateLightTintDraft: (patch: Partial<LightTintConfig>) => void
+  onUpdateLightTintScope: (scope: LightTintScope) => void
   onUpdateChromeDeleteDraft: (patch: Partial<ChromeDeleteConfig>) => void
   onUpdateChromeDeleteScope: (scope: ChromeDeleteScope) => void
   onUpdateTintDraft: (patch: Partial<TintConfig>) => void
@@ -102,6 +120,7 @@ export function PartServicePopup({
   canResetAllWraps,
   canResetCaliperPaint,
   canResetChromeDelete,
+  canResetLightTint,
   canResetPowderCoat,
   canResetTint,
   canResetWrap,
@@ -111,6 +130,9 @@ export function PartServicePopup({
   powderCoatConfig,
   powderCoatScope,
   powderCoatScopeOptions,
+  lightTintConfig,
+  lightTintScope,
+  lightTintScopeOptions,
   chromeDeleteConfig,
   chromeDeleteScope,
   chromeDeleteScopeOptions,
@@ -128,6 +150,7 @@ export function PartServicePopup({
   onResetAllWraps,
   onResetCaliperPaint,
   onResetChromeDelete,
+  onResetLightTint,
   onResetPowderCoat,
   onResetTint,
   onResetWrap,
@@ -136,6 +159,8 @@ export function PartServicePopup({
   onUpdateCaliperPaintScope,
   onUpdatePowderCoatDraft,
   onUpdatePowderCoatScope,
+  onUpdateLightTintDraft,
+  onUpdateLightTintScope,
   onUpdateChromeDeleteDraft,
   onUpdateChromeDeleteScope,
   onUpdateTintDraft,
@@ -145,6 +170,10 @@ export function PartServicePopup({
   const showWrapEditor = selectedServiceId === 'wrap' && wrapConfig !== null
   const showTintEditor =
     selectedServiceId === 'tint' && tintConfig !== null && tintScope !== null
+  const showLightTintEditor =
+    selectedServiceId === 'tint' &&
+    lightTintConfig !== null &&
+    lightTintScope !== null
   const showChromeDeleteEditor =
     selectedServiceId === 'chrome-delete' &&
     chromeDeleteConfig !== null &&
@@ -160,6 +189,7 @@ export function PartServicePopup({
   const showServiceList =
     !showWrapEditor &&
     !showTintEditor &&
+    !showLightTintEditor &&
     !showChromeDeleteEditor &&
     !showCaliperPaintEditor &&
     !showPowderCoatEditor
@@ -204,10 +234,19 @@ export function PartServicePopup({
     active: boolean
     source: number
   } | null>(null)
+  const [customLightTint, setCustomLightTint] = useState<{
+    active: boolean
+    source: number
+  } | null>(null)
   const customTintActive = tintConfig
     ? customTint?.source === tintConfig.vlt
       ? customTint.active
       : !tintShadeOptionSet.has(tintConfig.vlt)
+    : false
+  const customLightTintActive = lightTintConfig
+    ? customLightTint?.source === lightTintConfig.darkness
+      ? customLightTint.active
+      : !lightTintShadeDarknessSet.has(lightTintConfig.darkness)
     : false
 
   function handleColorChange(color: string) {
@@ -357,6 +396,28 @@ export function PartServicePopup({
     onUpdateTintDraft({ vlt: nextVlt })
   }
 
+  function handleLightTintShadeSelect(darkness: number) {
+    setCustomLightTint({ active: false, source: darkness })
+    onUpdateLightTintDraft({ darkness })
+  }
+
+  function handleCustomLightTintSelect() {
+    const nextDarkness = lightTintConfig?.darkness ?? 25
+
+    setCustomLightTint({ active: true, source: nextDarkness })
+  }
+
+  function handleCustomLightTintChange(value: string) {
+    const nextDarkness = Math.min(100, Math.max(0, Math.round(Number(value))))
+
+    if (!Number.isFinite(nextDarkness)) {
+      return
+    }
+
+    setCustomLightTint({ active: true, source: nextDarkness })
+    onUpdateLightTintDraft({ darkness: nextDarkness })
+  }
+
   return (
     <section
       className="part-popup"
@@ -476,6 +537,77 @@ export function PartServicePopup({
                   data-selected={tintScope === scope.id}
                   key={scope.id}
                   onClick={() => onUpdateTintScope(scope.id)}
+                >
+                  {scope.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showLightTintEditor && lightTintConfig && lightTintScope ? (
+        <div className="part-popup-wrap" aria-label="Light Tint options">
+          <div>
+            <p className="part-popup-finish-label">Shade</p>
+            <div className="part-popup-finish-grid" aria-label="Shade">
+              {lightTintShadeOptions.map((shade) => (
+                <button
+                  type="button"
+                  className="part-popup-finish"
+                  data-selected={
+                    !customLightTintActive &&
+                    lightTintConfig.darkness === shade.darkness
+                  }
+                  key={shade.label}
+                  onClick={() => handleLightTintShadeSelect(shade.darkness)}
+                >
+                  {shade.label}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="part-popup-finish"
+                data-selected={customLightTintActive}
+                onClick={handleCustomLightTintSelect}
+              >
+                Custom
+              </button>
+            </div>
+          </div>
+
+          {customLightTintActive ? (
+            <label className="part-popup-field">
+              <span>Darkness</span>
+              <div className="part-popup-tint-custom-row">
+                <input
+                  type="range"
+                  className="part-popup-vlt-input"
+                  aria-label="Custom tint darkness"
+                  min={0}
+                  max={100}
+                  value={lightTintConfig.darkness}
+                  onChange={(event) =>
+                    handleCustomLightTintChange(event.currentTarget.value)
+                  }
+                />
+                <span className="part-popup-color-value">
+                  {lightTintConfig.darkness}%
+                </span>
+              </div>
+            </label>
+          ) : null}
+
+          <div>
+            <p className="part-popup-finish-label">Apply To</p>
+            <div className="part-popup-finish-grid" aria-label="Apply To">
+              {lightTintScopeOptions.map((scope) => (
+                <button
+                  type="button"
+                  className="part-popup-finish"
+                  data-selected={lightTintScope === scope.id}
+                  key={scope.id}
+                  onClick={() => onUpdateLightTintScope(scope.id)}
                 >
                   {scope.label}
                 </button>
@@ -758,6 +890,27 @@ export function PartServicePopup({
               type="button"
               className="part-popup-link"
               onClick={onResetTint}
+            >
+              Reset
+            </button>
+          ) : null}
+          <button type="button" className="part-popup-apply" onClick={onApply}>
+            Apply
+          </button>
+        </div>
+      ) : showLightTintEditor ? (
+        <div className="part-popup-actions part-popup-actions--wrap">
+          <button type="button" className="part-popup-link" onClick={onBack}>
+            Back
+          </button>
+          <button type="button" className="part-popup-link" onClick={onCancel}>
+            Cancel
+          </button>
+          {canResetLightTint ? (
+            <button
+              type="button"
+              className="part-popup-link"
+              onClick={onResetLightTint}
             >
               Reset
             </button>

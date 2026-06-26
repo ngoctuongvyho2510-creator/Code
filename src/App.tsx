@@ -4,11 +4,13 @@ import {
   FULL_BODY_TARGET_ID,
   getCaliperPaintScopeOptions,
   getChromeDeleteScopeOptions,
+  getLightTintScopeOptions,
   getPowderCoatScopeOptions,
   getTintScopeOptions,
   getSelectionTarget,
   resolveCaliperPaintScopeTargetIds,
   resolveChromeDeleteScopeTargetIds,
+  resolveLightTintScopeTargetIds,
   resolvePowderCoatScopeTargetIds,
   resolveTintScopeTargetIds,
 } from './config/vehicleParts'
@@ -24,6 +26,7 @@ import {
 import type {
   CaliperPaintPreviewState,
   ChromeDeletePreviewState,
+  LightTintPreviewState,
   PowderCoatPreviewState,
   TintPreviewState,
   WrapPreviewState,
@@ -93,6 +96,32 @@ function App() {
     return {
       targetIds,
       tint: draftSelection.tintConfig,
+    }
+  }, [configuratorState.draftSelection])
+
+  const lightTintPreview = useMemo<LightTintPreviewState | null>(() => {
+    const draftSelection = configuratorState.draftSelection
+
+    if (
+      draftSelection?.serviceId !== 'tint' ||
+      !draftSelection.lightTintConfig ||
+      !draftSelection.lightTintScope
+    ) {
+      return null
+    }
+
+    const targetIds = resolveLightTintScopeTargetIds(
+      draftSelection.targetId,
+      draftSelection.lightTintScope,
+    )
+
+    if (targetIds.length === 0) {
+      return null
+    }
+
+    return {
+      targetIds,
+      lightTint: draftSelection.lightTintConfig,
     }
   }, [configuratorState.draftSelection])
 
@@ -195,6 +224,13 @@ function App() {
   const tintScopeOptions = activeTarget
     ? getTintScopeOptions(activeTarget.id)
     : []
+  const activeLightTintScope =
+    configuratorState.draftSelection?.serviceId === 'tint'
+      ? configuratorState.draftSelection.lightTintScope
+      : null
+  const lightTintScopeOptions = activeTarget
+    ? getLightTintScopeOptions(activeTarget.id)
+    : []
   const activeChromeDeleteScope =
     configuratorState.draftSelection?.serviceId === 'chrome-delete'
       ? configuratorState.draftSelection.chromeDeleteScope
@@ -221,6 +257,15 @@ function App() {
       ? resolveTintScopeTargetIds(activeTarget.id, activeTintScope).some(
           (targetId) =>
             Boolean(configuratorState.appliedDesign.parts[targetId]?.tint),
+        )
+      : false
+  const canResetLightTint =
+    activeTarget && activeLightTintScope
+      ? resolveLightTintScopeTargetIds(
+          activeTarget.id,
+          activeLightTintScope,
+        ).some((targetId) =>
+          Boolean(configuratorState.appliedDesign.parts[targetId]?.lightTint),
         )
       : false
   const canResetChromeDelete =
@@ -318,6 +363,7 @@ function App() {
             appliedDesign={configuratorState.appliedDesign}
             caliperPaintPreview={caliperPaintPreview}
             chromeDeletePreview={chromeDeletePreview}
+            lightTintPreview={lightTintPreview}
             powderCoatPreview={powderCoatPreview}
             ref={vehicleViewerRef}
             selectedTargetId={configuratorState.draftSelection?.targetId ?? null}
@@ -364,6 +410,13 @@ function App() {
                 configuratorState.draftSelection?.powderCoatScope ?? null
               }
               powderCoatScopeOptions={powderCoatScopeOptions}
+              lightTintConfig={
+                configuratorState.draftSelection?.lightTintConfig ?? null
+              }
+              lightTintScope={
+                configuratorState.draftSelection?.lightTintScope ?? null
+              }
+              lightTintScopeOptions={lightTintScopeOptions}
               wrapConfig={configuratorState.draftSelection?.wrapConfig ?? null}
               tintConfig={configuratorState.draftSelection?.tintConfig ?? null}
               tintScope={configuratorState.draftSelection?.tintScope ?? null}
@@ -375,6 +428,7 @@ function App() {
               canResetAllWraps={canResetAllWraps}
               canResetCaliperPaint={canResetCaliperPaint}
               canResetChromeDelete={canResetChromeDelete}
+              canResetLightTint={canResetLightTint}
               canResetPowderCoat={canResetPowderCoat}
               canResetTint={canResetTint}
               canResetWrap={activeTargetHasDirectWrap}
@@ -411,6 +465,15 @@ function App() {
                     })
                   : undefined
               }
+              onResetLightTint={() =>
+                activeLightTintScope
+                  ? dispatch({
+                      type: 'reset-light-tint',
+                      targetId: activeTarget.id,
+                      scope: activeLightTintScope,
+                    })
+                  : undefined
+              }
               onResetTint={() =>
                 activeTintScope
                   ? dispatch({
@@ -434,6 +497,12 @@ function App() {
               }
               onUpdateTintScope={(scope) =>
                 dispatch({ type: 'update-tint-scope', scope })
+              }
+              onUpdateLightTintDraft={(patch) =>
+                dispatch({ type: 'update-light-tint-draft', patch })
+              }
+              onUpdateLightTintScope={(scope) =>
+                dispatch({ type: 'update-light-tint-scope', scope })
               }
               onUpdateChromeDeleteDraft={(patch) =>
                 dispatch({ type: 'update-chrome-delete-draft', patch })

@@ -33,6 +33,7 @@ import {
   getSelectablePartByMeshName,
   getSelectionTarget,
   LICENSE_PLATE_MESH_NAMES,
+  LIGHT_TINT_MESH_NAMES,
   POWDER_COAT_MESH_NAMES,
   TINTABLE_GLASS_MESH_NAMES,
   WRAP_CAPABLE_MESH_NAMES,
@@ -45,6 +46,8 @@ import type {
   ChromeDeleteConfig,
   ChromeDeleteFinish,
   ChromeDeletePreviewState,
+  LightTintConfig,
+  LightTintPreviewState,
   PowderCoatConfig,
   PowderCoatFinish,
   PowderCoatPreviewState,
@@ -73,6 +76,7 @@ type PreparedModelScene = {
   fallbackPlateSurfaceNames: string[]
   foundCaliperPaintMeshNames: Set<string>
   foundChromeDeleteMeshNames: Set<string>
+  foundLightTintMeshNames: Set<string>
   foundPowderCoatMeshNames: Set<string>
   foundTintableMeshNames: Set<string>
   foundWrapCapableMeshNames: Set<string>
@@ -107,6 +111,7 @@ type S4ModelProps = {
   caliperPaintPreview: CaliperPaintPreviewState | null
   controlsRef: RefObject<OrbitControlsImpl | null>
   chromeDeletePreview: ChromeDeletePreviewState | null
+  lightTintPreview: LightTintPreviewState | null
   powderCoatPreview: PowderCoatPreviewState | null
   selectedTargetId: string | null
   tintPreview: TintPreviewState | null
@@ -118,12 +123,14 @@ type S4ModelProps = {
 const inspectedScenes = new WeakSet<Object3D>()
 const inspectedCaliperPaintMeshScenes = new WeakSet<Object3D>()
 const inspectedChromeDeleteMeshScenes = new WeakSet<Object3D>()
+const inspectedLightTintMeshScenes = new WeakSet<Object3D>()
 const inspectedPowderCoatMeshScenes = new WeakSet<Object3D>()
 const inspectedTintableMeshScenes = new WeakSet<Object3D>()
 const inspectedWrapMeshScenes = new WeakSet<Object3D>()
 const plateMeshNames = new Set<string>(LICENSE_PLATE_MESH_NAMES)
 const caliperPaintMeshNames = new Set<string>(CALIPER_PAINT_MESH_NAMES)
 const chromeDeleteMeshNames = new Set<string>(CHROME_DELETE_MESH_NAMES)
+const lightTintMeshNames = new Set<string>(LIGHT_TINT_MESH_NAMES)
 const powderCoatMeshNames = new Set<string>(POWDER_COAT_MESH_NAMES)
 const tintableMeshNames = new Set<string>(TINTABLE_GLASS_MESH_NAMES)
 const fullBodyMeshNames = new Set<string>(FULL_BODY_MESH_NAMES)
@@ -480,6 +487,7 @@ function createRuntimeMaterial(
   material: Material,
   wrapCapable: boolean,
   tintCapable: boolean,
+  lightTintCapable: boolean,
   chromeDeleteCapable: boolean,
   caliperPaintCapable: boolean,
   powderCoatCapable: boolean,
@@ -505,6 +513,7 @@ function createRuntimeMaterial(
     (
       wrapCapable ||
       tintCapable ||
+      lightTintCapable ||
       chromeDeleteCapable ||
       caliperPaintCapable ||
       powderCoatCapable
@@ -537,6 +546,7 @@ function createRuntimeMaterials(
   material: Material | Material[],
   wrapCapable: boolean,
   tintCapable: boolean,
+  lightTintCapable: boolean,
   chromeDeleteCapable: boolean,
   caliperPaintCapable: boolean,
   powderCoatCapable: boolean,
@@ -549,6 +559,7 @@ function createRuntimeMaterials(
         item,
         wrapCapable,
         tintCapable,
+        lightTintCapable,
         chromeDeleteCapable,
         caliperPaintCapable,
         powderCoatCapable,
@@ -562,6 +573,7 @@ function createRuntimeMaterials(
     material,
     wrapCapable,
     tintCapable,
+    lightTintCapable,
     chromeDeleteCapable,
     caliperPaintCapable,
     powderCoatCapable,
@@ -713,6 +725,7 @@ function prepareModelScene(
   const fallbackPlateSurfaceNames: string[] = []
   const foundCaliperPaintMeshNames = new Set<string>()
   const foundChromeDeleteMeshNames = new Set<string>()
+  const foundLightTintMeshNames = new Set<string>()
   const foundPowderCoatMeshNames = new Set<string>()
   const foundTintableMeshNames = new Set<string>()
   const foundWrapCapableMeshNames = new Set<string>()
@@ -738,6 +751,7 @@ function prepareModelScene(
 
     const wrapCapable = wrapCapableMeshNames.has(object.name)
     const tintCapable = tintableMeshNames.has(object.name)
+    const lightTintCapable = lightTintMeshNames.has(object.name)
     const chromeDeleteCapable = chromeDeleteMeshNames.has(object.name)
     const caliperPaintCapable = caliperPaintMeshNames.has(object.name)
     const powderCoatCapable = powderCoatMeshNames.has(object.name)
@@ -763,6 +777,10 @@ function prepareModelScene(
       foundPowderCoatMeshNames.add(object.name)
     }
 
+    if (lightTintCapable) {
+      foundLightTintMeshNames.add(object.name)
+    }
+
     if (tintCapable) {
       foundTintableMeshNames.add(object.name)
     }
@@ -775,6 +793,7 @@ function prepareModelScene(
         object.material,
         wrapCapable,
         tintCapable,
+        lightTintCapable,
         chromeDeleteCapable,
         caliperPaintCapable,
         powderCoatCapable,
@@ -801,6 +820,7 @@ function prepareModelScene(
     fallbackPlateSurfaceNames,
     foundCaliperPaintMeshNames,
     foundChromeDeleteMeshNames,
+    foundLightTintMeshNames,
     foundPowderCoatMeshNames,
     foundTintableMeshNames,
     foundWrapCapableMeshNames,
@@ -1027,6 +1047,29 @@ function logMissingPowderCoatMeshes(preparedScene: PreparedModelScene) {
   }
 
   console.warn('Registered powder-coat meshes not found in Mahir S4.glb')
+  console.table(missingMeshNames)
+}
+
+function logMissingLightTintMeshes(preparedScene: PreparedModelScene) {
+  if (
+    !import.meta.env.DEV ||
+    inspectedLightTintMeshScenes.has(preparedScene.scene)
+  ) {
+    return
+  }
+
+  inspectedLightTintMeshScenes.add(preparedScene.scene)
+
+  const missingMeshNames = LIGHT_TINT_MESH_NAMES.filter(
+    (meshName) => !preparedScene.foundLightTintMeshNames.has(meshName),
+  )
+
+  if (missingMeshNames.length === 0) {
+    console.info('All registered light-tint meshes were found in Mahir S4.glb.')
+    return
+  }
+
+  console.warn('Registered light-tint meshes not found in Mahir S4.glb')
   console.table(missingMeshNames)
 }
 
@@ -1261,6 +1304,126 @@ function applyTintMaterials(
 
     if (tint) {
       applyTintToMesh(object, tint)
+    }
+  })
+}
+
+function clampLightTintDarkness(darkness: number): number {
+  if (!Number.isFinite(darkness)) {
+    return 25
+  }
+
+  return Math.min(100, Math.max(0, darkness))
+}
+
+function getLightTintDarknessFactor(lightTint: LightTintConfig): number {
+  return clampLightTintDarkness(lightTint.darkness) / 100
+}
+
+function applyLightTintToMaterial(
+  material: Material,
+  lightTint: LightTintConfig,
+) {
+  if (!(material instanceof MeshStandardMaterial)) {
+    return
+  }
+
+  const darkness = getLightTintDarknessFactor(lightTint)
+  const smokeColor = new Color('#050608')
+  const originalOpacity = material.opacity
+  const wasTransparent = material.transparent || originalOpacity < 1
+  const lensBaseOpacity = wasTransparent ? originalOpacity : 0.68
+
+  material.color.lerp(smokeColor, 0.18 + darkness * 0.64)
+  material.emissive.set(0, 0, 0)
+  material.emissiveIntensity = 0
+  material.transparent = true
+  material.opacity = Math.min(0.88, lensBaseOpacity + darkness * 0.28)
+  material.depthTest = true
+  material.depthWrite = false
+  material.alphaHash = false
+  material.alphaTest = 0
+  material.metalness = Math.min(material.metalness, 0.08)
+  material.roughness = Math.min(
+    0.48,
+    Math.max(0.04, material.roughness + darkness * 0.1),
+  )
+  material.envMapIntensity = Math.max(
+    material.envMapIntensity,
+    1.08 + darkness * 0.26,
+  )
+  material.toneMapped = true
+  material.vertexColors = false
+
+  if (material instanceof MeshPhysicalMaterial) {
+    material.clearcoat = Math.max(material.clearcoat, 0.42 + darkness * 0.24)
+    material.clearcoatRoughness = Math.min(
+      0.22,
+      Math.max(0.04, material.clearcoatRoughness + darkness * 0.06),
+    )
+    material.reflectivity = Math.max(
+      material.reflectivity,
+      0.62 + darkness * 0.16,
+    )
+    material.transmission = Math.max(0, material.transmission * 0.75)
+    material.thickness = Math.max(material.thickness, 0.04)
+  }
+
+  material.needsUpdate = true
+}
+
+function applyLightTintToMesh(mesh: ModelMesh, lightTint: LightTintConfig) {
+  for (const material of getMaterials(mesh.material)) {
+    applyLightTintToMaterial(material, lightTint)
+  }
+}
+
+function getEffectiveLightTintForMesh(
+  meshName: string,
+  appliedDesign: AppliedDesignState,
+  lightTintPreview: LightTintPreviewState | null,
+  previewTargetIds: Set<string>,
+): LightTintConfig | null {
+  if (!lightTintMeshNames.has(meshName)) {
+    return null
+  }
+
+  const part = getSelectablePartByMeshName(meshName)
+
+  if (!part?.services.includes('tint')) {
+    return null
+  }
+
+  if (lightTintPreview && previewTargetIds.has(part.id)) {
+    return lightTintPreview.lightTint
+  }
+
+  return appliedDesign.parts[part.id]?.lightTint ?? null
+}
+
+function applyLightTintMaterials(
+  preparedScene: PreparedModelScene,
+  appliedDesign: AppliedDesignState,
+  lightTintPreview: LightTintPreviewState | null,
+) {
+  const previewTargetIds = new Set(lightTintPreview?.targetIds ?? [])
+
+  preparedScene.scene.traverse((object) => {
+    if (!isModelMesh(object) || !lightTintMeshNames.has(object.name)) {
+      return
+    }
+
+    resetMeshMaterialToFactory(object, preparedScene)
+
+    const lightTint = getEffectiveLightTintForMesh(
+      object.name,
+      appliedDesign,
+      lightTintPreview,
+      previewTargetIds,
+    )
+
+    if (lightTint) {
+      applyLightTintToMesh(object, lightTint)
     }
   })
 }
@@ -1599,7 +1762,8 @@ function getPartIdFromPointer(
     if (
       part.services.includes('chrome-delete') ||
       part.services.includes('caliper-paint') ||
-      part.services.includes('powder-coat')
+      part.services.includes('powder-coat') ||
+      (part.surfaceType === 'light' && part.services.includes('tint'))
     ) {
       return part.id
     }
@@ -1673,6 +1837,7 @@ export function S4Model({
   caliperPaintPreview,
   chromeDeletePreview,
   controlsRef,
+  lightTintPreview,
   powderCoatPreview,
   selectedTargetId,
   tintPreview,
@@ -1760,12 +1925,20 @@ export function S4Model({
   }, [preparedScene])
 
   useEffect(() => {
+    logMissingLightTintMeshes(preparedScene)
+  }, [preparedScene])
+
+  useEffect(() => {
     applyWrapMaterials(preparedScene, appliedDesign, wrapPreview)
   }, [appliedDesign, preparedScene, wrapPreview])
 
   useEffect(() => {
     applyTintMaterials(preparedScene, appliedDesign, tintPreview)
   }, [appliedDesign, preparedScene, tintPreview])
+
+  useEffect(() => {
+    applyLightTintMaterials(preparedScene, appliedDesign, lightTintPreview)
+  }, [appliedDesign, lightTintPreview, preparedScene])
 
   useEffect(() => {
     applyChromeDeleteMaterials(
