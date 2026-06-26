@@ -33,6 +33,7 @@ import {
   getSelectablePartByMeshName,
   getSelectionTarget,
   LICENSE_PLATE_MESH_NAMES,
+  POWDER_COAT_MESH_NAMES,
   TINTABLE_GLASS_MESH_NAMES,
   WRAP_CAPABLE_MESH_NAMES,
 } from '../../config/vehicleParts'
@@ -44,6 +45,9 @@ import type {
   ChromeDeleteConfig,
   ChromeDeleteFinish,
   ChromeDeletePreviewState,
+  PowderCoatConfig,
+  PowderCoatFinish,
+  PowderCoatPreviewState,
   TintConfig,
   TintPreviewState,
   VehiclePartDefinition,
@@ -69,6 +73,7 @@ type PreparedModelScene = {
   fallbackPlateSurfaceNames: string[]
   foundCaliperPaintMeshNames: Set<string>
   foundChromeDeleteMeshNames: Set<string>
+  foundPowderCoatMeshNames: Set<string>
   foundTintableMeshNames: Set<string>
   foundWrapCapableMeshNames: Set<string>
   nativePlateMeshNames: Set<string>
@@ -102,6 +107,7 @@ type S4ModelProps = {
   caliperPaintPreview: CaliperPaintPreviewState | null
   controlsRef: RefObject<OrbitControlsImpl | null>
   chromeDeletePreview: ChromeDeletePreviewState | null
+  powderCoatPreview: PowderCoatPreviewState | null
   selectedTargetId: string | null
   tintPreview: TintPreviewState | null
   wrapPreview: WrapPreviewState | null
@@ -112,11 +118,13 @@ type S4ModelProps = {
 const inspectedScenes = new WeakSet<Object3D>()
 const inspectedCaliperPaintMeshScenes = new WeakSet<Object3D>()
 const inspectedChromeDeleteMeshScenes = new WeakSet<Object3D>()
+const inspectedPowderCoatMeshScenes = new WeakSet<Object3D>()
 const inspectedTintableMeshScenes = new WeakSet<Object3D>()
 const inspectedWrapMeshScenes = new WeakSet<Object3D>()
 const plateMeshNames = new Set<string>(LICENSE_PLATE_MESH_NAMES)
 const caliperPaintMeshNames = new Set<string>(CALIPER_PAINT_MESH_NAMES)
 const chromeDeleteMeshNames = new Set<string>(CHROME_DELETE_MESH_NAMES)
+const powderCoatMeshNames = new Set<string>(POWDER_COAT_MESH_NAMES)
 const tintableMeshNames = new Set<string>(TINTABLE_GLASS_MESH_NAMES)
 const fullBodyMeshNames = new Set<string>(FULL_BODY_MESH_NAMES)
 const wrapCapableMeshNames = new Set<string>(WRAP_CAPABLE_MESH_NAMES)
@@ -274,6 +282,43 @@ const caliperPaintFinishSettings = {
     clearcoat: number
     clearcoatRoughness: number
     envMapIntensity: number
+    reflectivity: number
+    roughness: number
+  }
+>
+
+const powderCoatFinishSettings = {
+  gloss: {
+    clearcoat: 0.62,
+    clearcoatRoughness: 0.1,
+    envMapIntensity: 1.12,
+    metalness: 0.18,
+    reflectivity: 0.46,
+    roughness: 0.22,
+  },
+  satin: {
+    clearcoat: 0.28,
+    clearcoatRoughness: 0.34,
+    envMapIntensity: 0.92,
+    metalness: 0.12,
+    reflectivity: 0.34,
+    roughness: 0.5,
+  },
+  matte: {
+    clearcoat: 0.05,
+    clearcoatRoughness: 0.76,
+    envMapIntensity: 0.74,
+    metalness: 0.08,
+    reflectivity: 0.22,
+    roughness: 0.8,
+  },
+} as const satisfies Record<
+  PowderCoatFinish,
+  {
+    clearcoat: number
+    clearcoatRoughness: number
+    envMapIntensity: number
+    metalness: number
     reflectivity: number
     roughness: number
   }
@@ -437,6 +482,7 @@ function createRuntimeMaterial(
   tintCapable: boolean,
   chromeDeleteCapable: boolean,
   caliperPaintCapable: boolean,
+  powderCoatCapable: boolean,
   cleanFactoryChromeSideWindowTrim: boolean,
   cleanBlackExteriorTrim: boolean,
 ): Material {
@@ -456,7 +502,13 @@ function createRuntimeMaterial(
   }
 
   if (
-    (wrapCapable || tintCapable || chromeDeleteCapable || caliperPaintCapable) &&
+    (
+      wrapCapable ||
+      tintCapable ||
+      chromeDeleteCapable ||
+      caliperPaintCapable ||
+      powderCoatCapable
+    ) &&
     material instanceof MeshStandardMaterial
   ) {
     const runtimeMaterial = new MeshPhysicalMaterial()
@@ -487,6 +539,7 @@ function createRuntimeMaterials(
   tintCapable: boolean,
   chromeDeleteCapable: boolean,
   caliperPaintCapable: boolean,
+  powderCoatCapable: boolean,
   cleanFactoryChromeSideWindowTrim: boolean,
   cleanBlackExteriorTrim: boolean,
 ): Material | Material[] {
@@ -498,6 +551,7 @@ function createRuntimeMaterials(
         tintCapable,
         chromeDeleteCapable,
         caliperPaintCapable,
+        powderCoatCapable,
         cleanFactoryChromeSideWindowTrim,
         cleanBlackExteriorTrim,
       ),
@@ -510,6 +564,7 @@ function createRuntimeMaterials(
     tintCapable,
     chromeDeleteCapable,
     caliperPaintCapable,
+    powderCoatCapable,
     cleanFactoryChromeSideWindowTrim,
     cleanBlackExteriorTrim,
   )
@@ -658,6 +713,7 @@ function prepareModelScene(
   const fallbackPlateSurfaceNames: string[] = []
   const foundCaliperPaintMeshNames = new Set<string>()
   const foundChromeDeleteMeshNames = new Set<string>()
+  const foundPowderCoatMeshNames = new Set<string>()
   const foundTintableMeshNames = new Set<string>()
   const foundWrapCapableMeshNames = new Set<string>()
   const nativePlateMeshNames = new Set<string>()
@@ -684,6 +740,7 @@ function prepareModelScene(
     const tintCapable = tintableMeshNames.has(object.name)
     const chromeDeleteCapable = chromeDeleteMeshNames.has(object.name)
     const caliperPaintCapable = caliperPaintMeshNames.has(object.name)
+    const powderCoatCapable = powderCoatMeshNames.has(object.name)
     const cleanFactoryChromeSideWindowTrim =
       factoryChromeSideWindowTrimMeshNames.has(object.name)
     const cleanBlackExteriorTrim = cleanBlackExteriorTrimMeshNames.has(
@@ -702,6 +759,10 @@ function prepareModelScene(
       foundCaliperPaintMeshNames.add(object.name)
     }
 
+    if (powderCoatCapable) {
+      foundPowderCoatMeshNames.add(object.name)
+    }
+
     if (tintCapable) {
       foundTintableMeshNames.add(object.name)
     }
@@ -716,6 +777,7 @@ function prepareModelScene(
         tintCapable,
         chromeDeleteCapable,
         caliperPaintCapable,
+        powderCoatCapable,
         cleanFactoryChromeSideWindowTrim,
         cleanBlackExteriorTrim,
       )
@@ -739,6 +801,7 @@ function prepareModelScene(
     fallbackPlateSurfaceNames,
     foundCaliperPaintMeshNames,
     foundChromeDeleteMeshNames,
+    foundPowderCoatMeshNames,
     foundTintableMeshNames,
     foundWrapCapableMeshNames,
     nativePlateMeshNames,
@@ -941,6 +1004,29 @@ function logMissingCaliperPaintMeshes(preparedScene: PreparedModelScene) {
   }
 
   console.warn('Registered caliper-paint meshes not found in Mahir S4.glb')
+  console.table(missingMeshNames)
+}
+
+function logMissingPowderCoatMeshes(preparedScene: PreparedModelScene) {
+  if (
+    !import.meta.env.DEV ||
+    inspectedPowderCoatMeshScenes.has(preparedScene.scene)
+  ) {
+    return
+  }
+
+  inspectedPowderCoatMeshScenes.add(preparedScene.scene)
+
+  const missingMeshNames = POWDER_COAT_MESH_NAMES.filter(
+    (meshName) => !preparedScene.foundPowderCoatMeshNames.has(meshName),
+  )
+
+  if (missingMeshNames.length === 0) {
+    console.info('All registered powder-coat meshes were found in Mahir S4.glb.')
+    return
+  }
+
+  console.warn('Registered powder-coat meshes not found in Mahir S4.glb')
   console.table(missingMeshNames)
 }
 
@@ -1359,6 +1445,96 @@ function applyCaliperPaintMaterials(
   })
 }
 
+function applyPowderCoatToMaterial(
+  material: Material,
+  powderCoat: PowderCoatConfig,
+) {
+  if (!(material instanceof MeshStandardMaterial)) {
+    return
+  }
+
+  const settings = powderCoatFinishSettings[powderCoat.finish]
+
+  clearStandardMaterialTextureInputs(material)
+  applySmoothOpaqueSurfaceDefaults(material)
+
+  material.color.setStyle(powderCoat.color, SRGBColorSpace)
+  material.emissive.set(0, 0, 0)
+  material.emissiveIntensity = 0
+  material.metalness = settings.metalness
+  material.roughness = settings.roughness
+  material.envMapIntensity = settings.envMapIntensity
+
+  if (material instanceof MeshPhysicalMaterial) {
+    material.clearcoat = settings.clearcoat
+    material.clearcoatRoughness = settings.clearcoatRoughness
+    material.reflectivity = settings.reflectivity
+    material.transmission = 0
+    material.thickness = 0
+  }
+
+  material.needsUpdate = true
+}
+
+function applyPowderCoatToMesh(
+  mesh: ModelMesh,
+  powderCoat: PowderCoatConfig,
+) {
+  for (const material of getMaterials(mesh.material)) {
+    applyPowderCoatToMaterial(material, powderCoat)
+  }
+}
+
+function getEffectivePowderCoatForMesh(
+  meshName: string,
+  appliedDesign: AppliedDesignState,
+  powderCoatPreview: PowderCoatPreviewState | null,
+  previewTargetIds: Set<string>,
+): PowderCoatConfig | null {
+  if (!powderCoatMeshNames.has(meshName)) {
+    return null
+  }
+
+  const part = getSelectablePartByMeshName(meshName)
+
+  if (!part?.services.includes('powder-coat')) {
+    return null
+  }
+
+  if (powderCoatPreview && previewTargetIds.has(part.id)) {
+    return powderCoatPreview.powderCoat
+  }
+
+  return appliedDesign.parts[part.id]?.powderCoat ?? null
+}
+
+function applyPowderCoatMaterials(
+  preparedScene: PreparedModelScene,
+  appliedDesign: AppliedDesignState,
+  powderCoatPreview: PowderCoatPreviewState | null,
+) {
+  const previewTargetIds = new Set(powderCoatPreview?.targetIds ?? [])
+
+  preparedScene.scene.traverse((object) => {
+    if (!isModelMesh(object) || !powderCoatMeshNames.has(object.name)) {
+      return
+    }
+
+    resetMeshMaterialToFactory(object, preparedScene)
+
+    const powderCoat = getEffectivePowderCoatForMesh(
+      object.name,
+      appliedDesign,
+      powderCoatPreview,
+      previewTargetIds,
+    )
+
+    if (powderCoat) {
+      applyPowderCoatToMesh(object, powderCoat)
+    }
+  })
+}
+
 function resolveSelectablePart(object: Object3D): VehiclePartDefinition | null {
   let current: Object3D | null = object
 
@@ -1422,7 +1598,8 @@ function getPartIdFromPointer(
 
     if (
       part.services.includes('chrome-delete') ||
-      part.services.includes('caliper-paint')
+      part.services.includes('caliper-paint') ||
+      part.services.includes('powder-coat')
     ) {
       return part.id
     }
@@ -1496,6 +1673,7 @@ export function S4Model({
   caliperPaintPreview,
   chromeDeletePreview,
   controlsRef,
+  powderCoatPreview,
   selectedTargetId,
   tintPreview,
   wrapPreview,
@@ -1578,6 +1756,10 @@ export function S4Model({
   }, [preparedScene])
 
   useEffect(() => {
+    logMissingPowderCoatMeshes(preparedScene)
+  }, [preparedScene])
+
+  useEffect(() => {
     applyWrapMaterials(preparedScene, appliedDesign, wrapPreview)
   }, [appliedDesign, preparedScene, wrapPreview])
 
@@ -1600,6 +1782,10 @@ export function S4Model({
       caliperPaintPreview,
     )
   }, [appliedDesign, caliperPaintPreview, preparedScene])
+
+  useEffect(() => {
+    applyPowderCoatMaterials(preparedScene, appliedDesign, powderCoatPreview)
+  }, [appliedDesign, powderCoatPreview, preparedScene])
 
   useEffect(() => {
     applyOutlines(modelScene, selectedMeshNames, hoveredMeshNames)

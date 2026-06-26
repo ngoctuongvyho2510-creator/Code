@@ -4,10 +4,12 @@ import {
   FULL_BODY_TARGET_ID,
   getCaliperPaintScopeOptions,
   getChromeDeleteScopeOptions,
+  getPowderCoatScopeOptions,
   getTintScopeOptions,
   getSelectionTarget,
   resolveCaliperPaintScopeTargetIds,
   resolveChromeDeleteScopeTargetIds,
+  resolvePowderCoatScopeTargetIds,
   resolveTintScopeTargetIds,
 } from './config/vehicleParts'
 import { PartServicePopup } from './components/viewer/PartServicePopup'
@@ -22,6 +24,7 @@ import {
 import type {
   CaliperPaintPreviewState,
   ChromeDeletePreviewState,
+  PowderCoatPreviewState,
   TintPreviewState,
   WrapPreviewState,
 } from './types/configurator'
@@ -145,6 +148,32 @@ function App() {
     }
   }, [configuratorState.draftSelection])
 
+  const powderCoatPreview = useMemo<PowderCoatPreviewState | null>(() => {
+    const draftSelection = configuratorState.draftSelection
+
+    if (
+      draftSelection?.serviceId !== 'powder-coat' ||
+      !draftSelection.powderCoatConfig ||
+      !draftSelection.powderCoatScope
+    ) {
+      return null
+    }
+
+    const targetIds = resolvePowderCoatScopeTargetIds(
+      draftSelection.targetId,
+      draftSelection.powderCoatScope,
+    )
+
+    if (targetIds.length === 0) {
+      return null
+    }
+
+    return {
+      targetIds,
+      powderCoat: draftSelection.powderCoatConfig,
+    }
+  }, [configuratorState.draftSelection])
+
   const hasFullBodyWrapOverrides = FULL_BODY_PART_IDS.some((partId) =>
     Boolean(configuratorState.appliedDesign.parts[partId]?.wrap),
   )
@@ -180,6 +209,13 @@ function App() {
   const caliperPaintScopeOptions = activeTarget
     ? getCaliperPaintScopeOptions(activeTarget.id)
     : []
+  const activePowderCoatScope =
+    configuratorState.draftSelection?.serviceId === 'powder-coat'
+      ? configuratorState.draftSelection.powderCoatScope
+      : null
+  const powderCoatScopeOptions = activeTarget
+    ? getPowderCoatScopeOptions(activeTarget.id)
+    : []
   const canResetTint =
     activeTarget && activeTintScope
       ? resolveTintScopeTargetIds(activeTarget.id, activeTintScope).some(
@@ -206,6 +242,17 @@ function App() {
         ).some((targetId) =>
           Boolean(
             configuratorState.appliedDesign.parts[targetId]?.caliperPaint,
+          ),
+        )
+      : false
+  const canResetPowderCoat =
+    activeTarget && activePowderCoatScope
+      ? resolvePowderCoatScopeTargetIds(
+          activeTarget.id,
+          activePowderCoatScope,
+        ).some((targetId) =>
+          Boolean(
+            configuratorState.appliedDesign.parts[targetId]?.powderCoat,
           ),
         )
       : false
@@ -271,6 +318,7 @@ function App() {
             appliedDesign={configuratorState.appliedDesign}
             caliperPaintPreview={caliperPaintPreview}
             chromeDeletePreview={chromeDeletePreview}
+            powderCoatPreview={powderCoatPreview}
             ref={vehicleViewerRef}
             selectedTargetId={configuratorState.draftSelection?.targetId ?? null}
             tintPreview={tintPreview}
@@ -309,6 +357,13 @@ function App() {
                 configuratorState.draftSelection?.caliperPaintScope ?? null
               }
               caliperPaintScopeOptions={caliperPaintScopeOptions}
+              powderCoatConfig={
+                configuratorState.draftSelection?.powderCoatConfig ?? null
+              }
+              powderCoatScope={
+                configuratorState.draftSelection?.powderCoatScope ?? null
+              }
+              powderCoatScopeOptions={powderCoatScopeOptions}
               wrapConfig={configuratorState.draftSelection?.wrapConfig ?? null}
               tintConfig={configuratorState.draftSelection?.tintConfig ?? null}
               tintScope={configuratorState.draftSelection?.tintScope ?? null}
@@ -320,6 +375,7 @@ function App() {
               canResetAllWraps={canResetAllWraps}
               canResetCaliperPaint={canResetCaliperPaint}
               canResetChromeDelete={canResetChromeDelete}
+              canResetPowderCoat={canResetPowderCoat}
               canResetTint={canResetTint}
               canResetWrap={activeTargetHasDirectWrap}
               onApply={() => dispatch({ type: 'apply-draft' })}
@@ -334,6 +390,15 @@ function App() {
                       type: 'reset-caliper-paint',
                       targetId: activeTarget.id,
                       scope: activeCaliperPaintScope,
+                    })
+                  : undefined
+              }
+              onResetPowderCoat={() =>
+                activePowderCoatScope
+                  ? dispatch({
+                      type: 'reset-powder-coat',
+                      targetId: activeTarget.id,
+                      scope: activePowderCoatScope,
                     })
                   : undefined
               }
@@ -381,6 +446,12 @@ function App() {
               }
               onUpdateCaliperPaintScope={(scope) =>
                 dispatch({ type: 'update-caliper-paint-scope', scope })
+              }
+              onUpdatePowderCoatDraft={(patch) =>
+                dispatch({ type: 'update-powder-coat-draft', patch })
+              }
+              onUpdatePowderCoatScope={(scope) =>
+                dispatch({ type: 'update-powder-coat-scope', scope })
               }
             />
           ) : null}

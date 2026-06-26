@@ -3,10 +3,12 @@ import {
   FULL_BODY_TARGET_ID,
   getDefaultCaliperPaintScope,
   getDefaultChromeDeleteScope,
+  getDefaultPowderCoatScope,
   getDefaultTintScope,
   getSelectionTarget,
   resolveCaliperPaintScopeTargetIds,
   resolveChromeDeleteScopeTargetIds,
+  resolvePowderCoatScopeTargetIds,
   resolveTintScopeTargetIds,
 } from '../config/vehicleParts'
 import type {
@@ -19,6 +21,9 @@ import type {
   ChromeDeleteScope,
   DraftSelectionState,
   LayeredSurfaceState,
+  PowderCoatConfig,
+  PowderCoatFinish,
+  PowderCoatScope,
   SelectionTargetId,
   ServiceId,
   TintConfig,
@@ -44,6 +49,11 @@ const DEFAULT_CHROME_DELETE_CONFIG: ChromeDeleteConfig = {
 const DEFAULT_CALIPER_PAINT_CONFIG: CaliperPaintConfig = {
   color: '#d51f28',
   finish: 'gloss',
+}
+
+const DEFAULT_POWDER_COAT_CONFIG: PowderCoatConfig = {
+  color: '#2d3135',
+  finish: 'satin',
 }
 
 export type ConfiguratorState = {
@@ -89,6 +99,14 @@ export type ConfiguratorAction =
       scope: CaliperPaintScope
     }
   | {
+      type: 'update-powder-coat-draft'
+      patch: Partial<PowderCoatConfig>
+    }
+  | {
+      type: 'update-powder-coat-scope'
+      scope: PowderCoatScope
+    }
+  | {
       type: 'clear-service'
     }
   | {
@@ -120,6 +138,11 @@ export type ConfiguratorAction =
       scope: CaliperPaintScope
     }
   | {
+      type: 'reset-powder-coat'
+      targetId: SelectionTargetId
+      scope: PowderCoatScope
+    }
+  | {
       type: 'reset-all-wraps'
     }
 
@@ -129,6 +152,7 @@ function createLayeredSurfaceState(): LayeredSurfaceState {
     tint: null,
     chromeDelete: null,
     caliperPaint: null,
+    powderCoat: null,
     artwork: null,
     ppf: null,
     ceramic: null,
@@ -167,6 +191,13 @@ function applyServiceToSurface(
     return {
       ...surfaceState,
       caliperPaint: DEFAULT_CALIPER_PAINT_CONFIG,
+    }
+  }
+
+  if (serviceId === 'powder-coat') {
+    return {
+      ...surfaceState,
+      powderCoat: DEFAULT_POWDER_COAT_CONFIG,
     }
   }
 
@@ -276,6 +307,25 @@ function clearCaliperPaintFromSurface(
   }
 }
 
+function setPowderCoatOnSurface(
+  surfaceState: LayeredSurfaceState,
+  powderCoatConfig: PowderCoatConfig,
+): LayeredSurfaceState {
+  return {
+    ...surfaceState,
+    powderCoat: powderCoatConfig,
+  }
+}
+
+function clearPowderCoatFromSurface(
+  surfaceState: LayeredSurfaceState,
+): LayeredSurfaceState {
+  return {
+    ...surfaceState,
+    powderCoat: null,
+  }
+}
+
 function getAppliedWrapForTarget(
   appliedDesign: AppliedDesignState,
   targetId: SelectionTargetId,
@@ -353,6 +403,23 @@ function createCaliperPaintDraft(
   )
 }
 
+function getAppliedPowderCoatForTarget(
+  appliedDesign: AppliedDesignState,
+  targetId: SelectionTargetId,
+): PowderCoatConfig | null {
+  return appliedDesign.parts[targetId]?.powderCoat ?? null
+}
+
+function createPowderCoatDraft(
+  appliedDesign: AppliedDesignState,
+  targetId: SelectionTargetId,
+): PowderCoatConfig {
+  return (
+    getAppliedPowderCoatForTarget(appliedDesign, targetId) ??
+    DEFAULT_POWDER_COAT_CONFIG
+  )
+}
+
 function updateWrapDraft(
   currentWrap: WrapConfig,
   patch: Partial<WrapConfig>,
@@ -404,6 +471,20 @@ function updateCaliperPaintDraft(
   }
 }
 
+function updatePowderCoatDraft(
+  currentPowderCoat: PowderCoatConfig,
+  patch: Partial<PowderCoatConfig>,
+): PowderCoatConfig {
+  const finish = patch.finish
+
+  return {
+    color: patch.color ?? currentPowderCoat.color,
+    finish: isPowderCoatFinish(finish)
+      ? finish
+      : currentPowderCoat.finish,
+  }
+}
+
 function isWrapFinish(finish: WrapFinish | undefined): finish is WrapFinish {
   return finish === 'gloss' || finish === 'satin' || finish === 'matte'
 }
@@ -417,6 +498,12 @@ function isChromeDeleteFinish(
 function isCaliperPaintFinish(
   finish: CaliperPaintFinish | undefined,
 ): finish is CaliperPaintFinish {
+  return finish === 'gloss' || finish === 'satin' || finish === 'matte'
+}
+
+function isPowderCoatFinish(
+  finish: PowderCoatFinish | undefined,
+): finish is PowderCoatFinish {
   return finish === 'gloss' || finish === 'satin' || finish === 'matte'
 }
 
@@ -554,6 +641,44 @@ function clearCaliperPaintForTargetIds(
   return nextParts
 }
 
+function setPowderCoatForTargetIds(
+  parts: AppliedDesignState['parts'],
+  targetIds: readonly SelectionTargetId[],
+  powderCoatConfig: PowderCoatConfig,
+): AppliedDesignState['parts'] {
+  const nextParts: AppliedDesignState['parts'] = {
+    ...parts,
+  }
+
+  for (const targetId of targetIds) {
+    const currentPartState = nextParts[targetId] ?? createLayeredSurfaceState()
+
+    nextParts[targetId] = setPowderCoatOnSurface(
+      currentPartState,
+      powderCoatConfig,
+    )
+  }
+
+  return nextParts
+}
+
+function clearPowderCoatForTargetIds(
+  parts: AppliedDesignState['parts'],
+  targetIds: readonly SelectionTargetId[],
+): AppliedDesignState['parts'] {
+  const nextParts: AppliedDesignState['parts'] = {
+    ...parts,
+  }
+
+  for (const targetId of targetIds) {
+    const currentPartState = nextParts[targetId] ?? createLayeredSurfaceState()
+
+    nextParts[targetId] = clearPowderCoatFromSurface(currentPartState)
+  }
+
+  return nextParts
+}
+
 export const initialConfiguratorState: ConfiguratorState = {
   appliedDesign: {
     fullBody: createLayeredSurfaceState(),
@@ -585,6 +710,8 @@ export function configuratorReducer(
         chromeDeleteScope: null,
         caliperPaintConfig: null,
         caliperPaintScope: null,
+        powderCoatConfig: null,
+        powderCoatScope: null,
       },
     }
   }
@@ -628,6 +755,17 @@ export function configuratorReducer(
             state.draftSelection.targetId,
           )
         : null
+    const defaultPowderCoatScope =
+      action.serviceId === 'powder-coat'
+        ? getDefaultPowderCoatScope(state.draftSelection.targetId)
+        : null
+    const powderCoatConfig =
+      action.serviceId === 'powder-coat' && defaultPowderCoatScope
+        ? createPowderCoatDraft(
+            state.appliedDesign,
+            state.draftSelection.targetId,
+          )
+        : null
 
     return {
       ...state,
@@ -641,6 +779,8 @@ export function configuratorReducer(
         chromeDeleteScope: defaultChromeDeleteScope,
         caliperPaintConfig,
         caliperPaintScope: defaultCaliperPaintScope,
+        powderCoatConfig,
+        powderCoatScope: defaultPowderCoatScope,
       },
     }
   }
@@ -806,6 +946,54 @@ export function configuratorReducer(
     }
   }
 
+  if (action.type === 'update-powder-coat-draft') {
+    const draftSelection = state.draftSelection
+
+    if (draftSelection?.serviceId !== 'powder-coat') {
+      return state
+    }
+
+    const currentPowderCoat =
+      draftSelection.powderCoatConfig ??
+      createPowderCoatDraft(state.appliedDesign, draftSelection.targetId)
+
+    return {
+      ...state,
+      draftSelection: {
+        ...draftSelection,
+        powderCoatConfig: updatePowderCoatDraft(
+          currentPowderCoat,
+          action.patch,
+        ),
+      },
+    }
+  }
+
+  if (action.type === 'update-powder-coat-scope') {
+    const draftSelection = state.draftSelection
+
+    if (draftSelection?.serviceId !== 'powder-coat') {
+      return state
+    }
+
+    if (
+      resolvePowderCoatScopeTargetIds(
+        draftSelection.targetId,
+        action.scope,
+      ).length === 0
+    ) {
+      return state
+    }
+
+    return {
+      ...state,
+      draftSelection: {
+        ...draftSelection,
+        powderCoatScope: action.scope,
+      },
+    }
+  }
+
   if (action.type === 'clear-service') {
     if (!state.draftSelection) {
       return state
@@ -823,6 +1011,8 @@ export function configuratorReducer(
         chromeDeleteScope: null,
         caliperPaintConfig: null,
         caliperPaintScope: null,
+        powderCoatConfig: null,
+        powderCoatScope: null,
       },
     }
   }
@@ -961,6 +1151,34 @@ export function configuratorReducer(
             state.appliedDesign.parts,
             caliperPaintTargetIds,
             draftSelection.caliperPaintConfig,
+          ),
+        },
+        draftSelection: null,
+      }
+    }
+
+    if (draftSelection.serviceId === 'powder-coat') {
+      if (!draftSelection.powderCoatConfig || !draftSelection.powderCoatScope) {
+        return state
+      }
+
+      const powderCoatTargetIds = resolvePowderCoatScopeTargetIds(
+        draftSelection.targetId,
+        draftSelection.powderCoatScope,
+      )
+
+      if (powderCoatTargetIds.length === 0) {
+        return state
+      }
+
+      return {
+        ...state,
+        appliedDesign: {
+          ...state.appliedDesign,
+          parts: setPowderCoatForTargetIds(
+            state.appliedDesign.parts,
+            powderCoatTargetIds,
+            draftSelection.powderCoatConfig,
           ),
         },
         draftSelection: null,
@@ -1114,6 +1332,29 @@ export function configuratorReducer(
         parts: clearCaliperPaintForTargetIds(
           state.appliedDesign.parts,
           caliperPaintTargetIds,
+        ),
+      },
+      draftSelection: null,
+    }
+  }
+
+  if (action.type === 'reset-powder-coat') {
+    const powderCoatTargetIds = resolvePowderCoatScopeTargetIds(
+      action.targetId,
+      action.scope,
+    )
+
+    if (powderCoatTargetIds.length === 0) {
+      return state
+    }
+
+    return {
+      ...state,
+      appliedDesign: {
+        ...state.appliedDesign,
+        parts: clearPowderCoatForTargetIds(
+          state.appliedDesign.parts,
+          powderCoatTargetIds,
         ),
       },
       draftSelection: null,

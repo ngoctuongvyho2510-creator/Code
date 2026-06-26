@@ -106,6 +106,20 @@ export type CaliperPaintConfig = {
   finish: CaliperPaintFinish
 }
 
+export type PowderCoatFinish = 'gloss' | 'satin' | 'matte'
+
+export type PowderCoatScope = 'this' | 'front' | 'rear' | 'all'
+
+export type PowderCoatScopeOption = {
+  id: PowderCoatScope
+  label: string
+}
+
+export type PowderCoatConfig = {
+  color: string
+  finish: PowderCoatFinish
+}
+
 export type AppliedServiceState = {
   serviceId: ServiceId
 }
@@ -115,6 +129,7 @@ export type LayeredSurfaceState = {
   tint: TintConfig | null
   chromeDelete: ChromeDeleteConfig | null
   caliperPaint: CaliperPaintConfig | null
+  powderCoat: PowderCoatConfig | null
   artwork: AppliedServiceState | null
   ppf: AppliedServiceState | null
   ceramic: AppliedServiceState | null
@@ -136,6 +151,8 @@ export type DraftSelectionState = {
   chromeDeleteScope: ChromeDeleteScope | null
   caliperPaintConfig: CaliperPaintConfig | null
   caliperPaintScope: CaliperPaintScope | null
+  powderCoatConfig: PowderCoatConfig | null
+  powderCoatScope: PowderCoatScope | null
 }
 
 export type WrapPreviewState = {
@@ -156,4 +173,9 @@ export type ChromeDeletePreviewState = {
 export type CaliperPaintPreviewState = {
   targetIds: readonly SelectionTargetId[]
   caliperPaint: CaliperPaintConfig
+}
+
+export type PowderCoatPreviewState = {
+  targetIds: readonly SelectionTargetId[]
+  powderCoat: PowderCoatConfig
 }

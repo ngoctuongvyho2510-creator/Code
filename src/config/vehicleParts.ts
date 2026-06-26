@@ -4,6 +4,8 @@ import type {
   ChromeDeleteScope,
   ChromeDeleteScopeOption,
   PartGroup,
+  PowderCoatScope,
+  PowderCoatScopeOption,
   ServiceId,
   SurfaceType,
   TintScope,
@@ -46,7 +48,7 @@ const CALIPER_SERVICES = ['caliper-paint'] as const satisfies readonly ServiceId
 const BRAKE_DISC_SERVICES = ['performance'] as const satisfies readonly ServiceId[]
 const LAMP_SERVICES = ['ppf', 'ceramic'] as const satisfies readonly ServiceId[]
 const SIGNAL_SERVICES = ['ppf'] as const satisfies readonly ServiceId[]
-const EXHAUST_SERVICES = ['powder-coat', 'ceramic'] as const satisfies readonly ServiceId[]
+const EXHAUST_SERVICES = ['ceramic'] as const satisfies readonly ServiceId[]
 const WIPER_SERVICES = ['wrap'] as const satisfies readonly ServiceId[]
 
 export const TINTABLE_GLASS_PART_IDS = [
@@ -74,6 +76,13 @@ export const CALIPER_PAINT_PART_IDS = [
   'caliper-front-right',
   'caliper-rear-left',
   'caliper-rear-right',
+] as const
+
+export const POWDER_COAT_PART_IDS = [
+  'wheel-front-left',
+  'wheel-front-right',
+  'wheel-rear-left',
+  'wheel-rear-right',
 ] as const
 
 const FRONT_SIDE_TINT_PART_IDS = [
@@ -117,6 +126,16 @@ const REAR_CALIPER_PAINT_PART_IDS = [
   'caliper-rear-right',
 ] as const
 
+const FRONT_POWDER_COAT_PART_IDS = [
+  'wheel-front-left',
+  'wheel-front-right',
+] as const
+
+const REAR_POWDER_COAT_PART_IDS = [
+  'wheel-rear-left',
+  'wheel-rear-right',
+] as const
+
 const tintScopeLabels = {
   this: 'This',
   pair: 'Pair',
@@ -136,6 +155,13 @@ const caliperPaintScopeLabels = {
   rear: 'Rear',
   all: 'All',
 } as const satisfies Record<CaliperPaintScope, string>
+
+const powderCoatScopeLabels = {
+  this: 'This',
+  front: 'Front',
+  rear: 'Rear',
+  all: 'All',
+} as const satisfies Record<PowderCoatScope, string>
 
 const tintScopesByPartId = {
   windshield: ['this', 'all'],
@@ -191,6 +217,16 @@ const caliperPaintScopesByPartId = {
 } as const satisfies Record<
   (typeof CALIPER_PAINT_PART_IDS)[number],
   readonly CaliperPaintScope[]
+>
+
+const powderCoatScopesByPartId = {
+  'wheel-front-left': ['this', 'front', 'rear', 'all'],
+  'wheel-front-right': ['this', 'front', 'rear', 'all'],
+  'wheel-rear-left': ['this', 'front', 'rear', 'all'],
+  'wheel-rear-right': ['this', 'front', 'rear', 'all'],
+} as const satisfies Record<
+  (typeof POWDER_COAT_PART_IDS)[number],
+  readonly PowderCoatScope[]
 >
 
 export const FULL_BODY_MESH_NAMES = [
@@ -321,10 +357,10 @@ export const VEHICLE_PARTS = [
   vehiclePart('lower-grille-left', 'Lower Grille L', ['MW_GRILLE_LOWER_L'], 'grille', GRILLE_SERVICES, 'grille'),
   vehiclePart('lower-grille-right', 'Lower Grille R', ['MW_GRILLE_LOWER_R'], 'grille', GRILLE_SERVICES, 'grille'),
 
-  vehiclePart('wheel-front-left', 'Wheel FL', ['MW_WHEEL_FL'], 'wheel', WHEEL_SERVICES, 'wheel'),
-  vehiclePart('wheel-front-right', 'Wheel FR', ['MW_WHEEL_FR'], 'wheel', WHEEL_SERVICES, 'wheel'),
-  vehiclePart('wheel-rear-left', 'Wheel RL', ['MW_WHEEL_RL'], 'wheel', WHEEL_SERVICES, 'wheel'),
-  vehiclePart('wheel-rear-right', 'Wheel RR', ['MW_WHEEL_RR'], 'wheel', WHEEL_SERVICES, 'wheel'),
+  vehiclePart('wheel-front-left', 'Front Left Wheel', ['MW_WHEEL_FL'], 'wheel', WHEEL_SERVICES, 'wheel'),
+  vehiclePart('wheel-front-right', 'Front Right Wheel', ['MW_WHEEL_FR'], 'wheel', WHEEL_SERVICES, 'wheel'),
+  vehiclePart('wheel-rear-left', 'Rear Left Wheel', ['MW_WHEEL_RL'], 'wheel', WHEEL_SERVICES, 'wheel'),
+  vehiclePart('wheel-rear-right', 'Rear Right Wheel', ['MW_WHEEL_RR'], 'wheel', WHEEL_SERVICES, 'wheel'),
   vehiclePart('center-cap-front-left', 'Center Cap FL', ['MW_PART_CENTER_CAP_FL', 'MW_EMBLEM_AUDI_CENTER_CAP_FL'], 'center-cap', CENTER_CAP_SERVICES, 'wheel'),
   vehiclePart('center-cap-front-right', 'Center Cap FR', ['MW_PART_CENTER_CAP_FR', 'MW_EMBLEM_AUDI_CENTER_CAP_FR'], 'center-cap', CENTER_CAP_SERVICES, 'wheel'),
   vehiclePart('center-cap-rear-left', 'Center Cap RL', ['MW_PART_CENTER_CAP_RL', 'MW_EMBLEM_AUDI_CENTER_CAP_RL'], 'center-cap', CENTER_CAP_SERVICES, 'wheel'),
@@ -391,6 +427,10 @@ export const CHROME_DELETE_MESH_NAMES = CHROME_DELETE_PART_IDS.flatMap(
 )
 
 export const CALIPER_PAINT_MESH_NAMES = CALIPER_PAINT_PART_IDS.flatMap(
+  (partId) => partById.get(partId)?.meshNames ?? [],
+)
+
+export const POWDER_COAT_MESH_NAMES = POWDER_COAT_PART_IDS.flatMap(
   (partId) => partById.get(partId)?.meshNames ?? [],
 )
 
@@ -509,6 +549,64 @@ export function resolveCaliperPaintScopeTargetIds(
   }
 
   return CALIPER_PAINT_PART_IDS
+}
+
+export function isPowderCoatTarget(targetId: string): boolean {
+  return POWDER_COAT_PART_IDS.includes(
+    targetId as (typeof POWDER_COAT_PART_IDS)[number],
+  )
+}
+
+export function getDefaultPowderCoatScope(
+  targetId: string,
+): PowderCoatScope | null {
+  return getPowderCoatScopeOptions(targetId)[0]?.id ?? null
+}
+
+export function getPowderCoatScopeOptions(
+  targetId: string,
+): readonly PowderCoatScopeOption[] {
+  if (!isPowderCoatTarget(targetId)) {
+    return []
+  }
+
+  const partId = targetId as (typeof POWDER_COAT_PART_IDS)[number]
+
+  return powderCoatScopesByPartId[partId].map((scope) => ({
+    id: scope,
+    label: powderCoatScopeLabels[scope],
+  }))
+}
+
+export function resolvePowderCoatScopeTargetIds(
+  targetId: string,
+  scope: PowderCoatScope,
+): readonly string[] {
+  if (!isPowderCoatTarget(targetId)) {
+    return []
+  }
+
+  const validScopes = powderCoatScopesByPartId[
+    targetId as (typeof POWDER_COAT_PART_IDS)[number]
+  ]
+
+  if (!(validScopes as readonly PowderCoatScope[]).includes(scope)) {
+    return []
+  }
+
+  if (scope === 'this') {
+    return [targetId]
+  }
+
+  if (scope === 'front') {
+    return FRONT_POWDER_COAT_PART_IDS
+  }
+
+  if (scope === 'rear') {
+    return REAR_POWDER_COAT_PART_IDS
+  }
+
+  return POWDER_COAT_PART_IDS
 }
 
 export function isTintableGlassTarget(targetId: string): boolean {
