@@ -1,6 +1,10 @@
 import { useState } from 'react'
 import { getService } from '../../config/services'
 import type {
+  ChromeDeleteConfig,
+  ChromeDeleteFinish,
+  ChromeDeleteScope,
+  ChromeDeleteScopeOption,
   ServiceId,
   TintConfig,
   TintScope,
@@ -16,6 +20,12 @@ const wrapFinishOptions = [
   { id: 'matte', label: 'Matte' },
 ] as const satisfies readonly { id: WrapFinish; label: string }[]
 
+const chromeDeleteFinishOptions = [
+  { id: 'gloss', label: 'Gloss' },
+  { id: 'satin', label: 'Satin' },
+  { id: 'matte', label: 'Matte' },
+] as const satisfies readonly { id: ChromeDeleteFinish; label: string }[]
+
 const validHexColorPattern = /^#[0-9A-F]{6}$/
 const partialHexColorPattern = /^#[0-9A-F]{0,6}$/
 const tintShadeOptions = [70, 50, 35, 20, 5] as const
@@ -24,12 +34,16 @@ const tintShadeOptionSet = new Set<number>(tintShadeOptions)
 type PartServicePopupProps = {
   target: VehiclePartDefinition
   selectedServiceId: ServiceId | null
+  chromeDeleteConfig: ChromeDeleteConfig | null
+  chromeDeleteScope: ChromeDeleteScope | null
+  chromeDeleteScopeOptions: readonly ChromeDeleteScopeOption[]
   wrapConfig: WrapConfig | null
   tintConfig: TintConfig | null
   tintScope: TintScope | null
   tintScopeOptions: readonly TintScopeOption[]
   canApplyAllWraps: boolean
   canResetAllWraps: boolean
+  canResetChromeDelete: boolean
   canResetTint: boolean
   canResetWrap: boolean
   onApply: () => void
@@ -38,9 +52,12 @@ type PartServicePopupProps = {
   onCancel: () => void
   onClose: () => void
   onResetAllWraps: () => void
+  onResetChromeDelete: () => void
   onResetTint: () => void
   onResetWrap: () => void
   onSelectService: (serviceId: ServiceId) => void
+  onUpdateChromeDeleteDraft: (patch: Partial<ChromeDeleteConfig>) => void
+  onUpdateChromeDeleteScope: (scope: ChromeDeleteScope) => void
   onUpdateTintDraft: (patch: Partial<TintConfig>) => void
   onUpdateTintScope: (scope: TintScope) => void
   onUpdateWrapDraft: (patch: Partial<WrapConfig>) => void
@@ -49,8 +66,12 @@ type PartServicePopupProps = {
 export function PartServicePopup({
   canApplyAllWraps,
   canResetAllWraps,
+  canResetChromeDelete,
   canResetTint,
   canResetWrap,
+  chromeDeleteConfig,
+  chromeDeleteScope,
+  chromeDeleteScopeOptions,
   target,
   selectedServiceId,
   tintConfig,
@@ -63,9 +84,12 @@ export function PartServicePopup({
   onCancel,
   onClose,
   onResetAllWraps,
+  onResetChromeDelete,
   onResetTint,
   onResetWrap,
   onSelectService,
+  onUpdateChromeDeleteDraft,
+  onUpdateChromeDeleteScope,
   onUpdateTintDraft,
   onUpdateTintScope,
   onUpdateWrapDraft,
@@ -73,14 +97,29 @@ export function PartServicePopup({
   const showWrapEditor = selectedServiceId === 'wrap' && wrapConfig !== null
   const showTintEditor =
     selectedServiceId === 'tint' && tintConfig !== null && tintScope !== null
-  const showServiceList = !showWrapEditor && !showTintEditor
+  const showChromeDeleteEditor =
+    selectedServiceId === 'chrome-delete' &&
+    chromeDeleteConfig !== null &&
+    chromeDeleteScope !== null
+  const showServiceList =
+    !showWrapEditor && !showTintEditor && !showChromeDeleteEditor
   const syncedHexValue = wrapConfig?.color.toUpperCase() ?? '#C49D59'
+  const syncedChromeDeleteHexValue =
+    chromeDeleteConfig?.color.toUpperCase() ?? '#050505'
   const [hexInput, setHexInput] = useState<{
+    source: string
+    value: string
+  } | null>(null)
+  const [chromeDeleteHexInput, setChromeDeleteHexInput] = useState<{
     source: string
     value: string
   } | null>(null)
   const hexValue =
     hexInput?.source === syncedHexValue ? hexInput.value : syncedHexValue
+  const chromeDeleteHexValue =
+    chromeDeleteHexInput?.source === syncedChromeDeleteHexValue
+      ? chromeDeleteHexInput.value
+      : syncedChromeDeleteHexValue
   const [customTint, setCustomTint] = useState<{
     active: boolean
     source: number
@@ -117,6 +156,37 @@ export function PartServicePopup({
 
   function handleHexBlur() {
     setHexInput(null)
+  }
+
+  function handleChromeDeleteColorChange(color: string) {
+    const normalizedColor = color.toUpperCase()
+
+    setChromeDeleteHexInput(null)
+    onUpdateChromeDeleteDraft({ color: normalizedColor.toLowerCase() })
+  }
+
+  function handleChromeDeleteHexChange(value: string) {
+    const nextValue = value.trim().toUpperCase()
+    const prefixedValue = nextValue.startsWith('#')
+      ? nextValue
+      : `#${nextValue}`
+
+    if (!partialHexColorPattern.test(prefixedValue)) {
+      return
+    }
+
+    setChromeDeleteHexInput({
+      source: syncedChromeDeleteHexValue,
+      value: prefixedValue,
+    })
+
+    if (validHexColorPattern.test(prefixedValue)) {
+      onUpdateChromeDeleteDraft({ color: prefixedValue.toLowerCase() })
+    }
+  }
+
+  function handleChromeDeleteHexBlur() {
+    setChromeDeleteHexInput(null)
   }
 
   function handleTintShadeSelect(vlt: number) {
@@ -273,6 +343,73 @@ export function PartServicePopup({
         </div>
       ) : null}
 
+      {showChromeDeleteEditor && chromeDeleteConfig && chromeDeleteScope ? (
+        <div className="part-popup-wrap" aria-label="Chrome Delete options">
+          <label className="part-popup-field">
+            <span>Color</span>
+            <div className="part-popup-color-row">
+              <input
+                type="color"
+                className="part-popup-color-input"
+                value={chromeDeleteConfig.color}
+                onChange={(event) =>
+                  handleChromeDeleteColorChange(event.currentTarget.value)
+                }
+              />
+              <input
+                type="text"
+                className="part-popup-hex-input"
+                aria-label="Hex color"
+                inputMode="text"
+                maxLength={7}
+                spellCheck={false}
+                value={chromeDeleteHexValue}
+                onBlur={handleChromeDeleteHexBlur}
+                onChange={(event) =>
+                  handleChromeDeleteHexChange(event.currentTarget.value)
+                }
+              />
+            </div>
+          </label>
+
+          <div>
+            <p className="part-popup-finish-label">Finish</p>
+            <div className="part-popup-finish-grid" aria-label="Finish">
+              {chromeDeleteFinishOptions.map((finish) => (
+                <button
+                  type="button"
+                  className="part-popup-finish"
+                  data-selected={chromeDeleteConfig.finish === finish.id}
+                  key={finish.id}
+                  onClick={() =>
+                    onUpdateChromeDeleteDraft({ finish: finish.id })
+                  }
+                >
+                  {finish.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <p className="part-popup-finish-label">Apply To</p>
+            <div className="part-popup-finish-grid" aria-label="Apply To">
+              {chromeDeleteScopeOptions.map((scope) => (
+                <button
+                  type="button"
+                  className="part-popup-finish"
+                  data-selected={chromeDeleteScope === scope.id}
+                  key={scope.id}
+                  onClick={() => onUpdateChromeDeleteScope(scope.id)}
+                >
+                  {scope.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {showServiceList ? (
         <div className="part-popup-services" aria-label="Services">
           {target.services.map((serviceId) => {
@@ -345,6 +482,27 @@ export function PartServicePopup({
               type="button"
               className="part-popup-link"
               onClick={onResetTint}
+            >
+              Reset
+            </button>
+          ) : null}
+          <button type="button" className="part-popup-apply" onClick={onApply}>
+            Apply
+          </button>
+        </div>
+      ) : showChromeDeleteEditor ? (
+        <div className="part-popup-actions part-popup-actions--wrap">
+          <button type="button" className="part-popup-link" onClick={onBack}>
+            Back
+          </button>
+          <button type="button" className="part-popup-link" onClick={onCancel}>
+            Cancel
+          </button>
+          {canResetChromeDelete ? (
+            <button
+              type="button"
+              className="part-popup-link"
+              onClick={onResetChromeDelete}
             >
               Reset
             </button>

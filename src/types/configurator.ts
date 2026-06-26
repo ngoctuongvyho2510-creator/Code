@@ -78,6 +78,20 @@ export type TintConfig = {
   vlt: number
 }
 
+export type ChromeDeleteFinish = 'gloss' | 'satin' | 'matte'
+
+export type ChromeDeleteScope = 'this' | 'both' | 'all-chrome'
+
+export type ChromeDeleteScopeOption = {
+  id: ChromeDeleteScope
+  label: string
+}
+
+export type ChromeDeleteConfig = {
+  color: string
+  finish: ChromeDeleteFinish
+}
+
 export type AppliedServiceState = {
   serviceId: ServiceId
 }
@@ -85,6 +99,7 @@ export type AppliedServiceState = {
 export type LayeredSurfaceState = {
   wrap: WrapConfig | null
   tint: TintConfig | null
+  chromeDelete: ChromeDeleteConfig | null
   artwork: AppliedServiceState | null
   ppf: AppliedServiceState | null
   ceramic: AppliedServiceState | null
@@ -102,6 +117,8 @@ export type DraftSelectionState = {
   wrapConfig: WrapConfig | null
   tintConfig: TintConfig | null
   tintScope: TintScope | null
+  chromeDeleteConfig: ChromeDeleteConfig | null
+  chromeDeleteScope: ChromeDeleteScope | null
 }
 
 export type WrapPreviewState = {
@@ -112,4 +129,9 @@ export type WrapPreviewState = {
 export type TintPreviewState = {
   targetIds: readonly SelectionTargetId[]
   tint: TintConfig
+}
+
+export type ChromeDeletePreviewState = {
+  targetIds: readonly SelectionTargetId[]
+  chromeDelete: ChromeDeleteConfig
 }

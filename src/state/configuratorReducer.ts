@@ -1,12 +1,17 @@
 import {
   FULL_BODY_PART_IDS,
   FULL_BODY_TARGET_ID,
+  getDefaultChromeDeleteScope,
   getDefaultTintScope,
   getSelectionTarget,
+  resolveChromeDeleteScopeTargetIds,
   resolveTintScopeTargetIds,
 } from '../config/vehicleParts'
 import type {
   AppliedDesignState,
+  ChromeDeleteConfig,
+  ChromeDeleteFinish,
+  ChromeDeleteScope,
   DraftSelectionState,
   LayeredSurfaceState,
   SelectionTargetId,
@@ -24,6 +29,11 @@ const DEFAULT_WRAP_CONFIG: WrapConfig = {
 
 const DEFAULT_TINT_CONFIG: TintConfig = {
   vlt: 35,
+}
+
+const DEFAULT_CHROME_DELETE_CONFIG: ChromeDeleteConfig = {
+  color: '#050505',
+  finish: 'gloss',
 }
 
 export type ConfiguratorState = {
@@ -53,6 +63,14 @@ export type ConfiguratorAction =
       scope: TintScope
     }
   | {
+      type: 'update-chrome-delete-draft'
+      patch: Partial<ChromeDeleteConfig>
+    }
+  | {
+      type: 'update-chrome-delete-scope'
+      scope: ChromeDeleteScope
+    }
+  | {
       type: 'clear-service'
     }
   | {
@@ -74,6 +92,11 @@ export type ConfiguratorAction =
       scope: TintScope
     }
   | {
+      type: 'reset-chrome-delete'
+      targetId: SelectionTargetId
+      scope: ChromeDeleteScope
+    }
+  | {
       type: 'reset-all-wraps'
     }
 
@@ -81,6 +104,7 @@ function createLayeredSurfaceState(): LayeredSurfaceState {
   return {
     wrap: null,
     tint: null,
+    chromeDelete: null,
     artwork: null,
     ppf: null,
     ceramic: null,
@@ -105,6 +129,13 @@ function applyServiceToSurface(
     return {
       ...surfaceState,
       tint: DEFAULT_TINT_CONFIG,
+    }
+  }
+
+  if (serviceId === 'chrome-delete') {
+    return {
+      ...surfaceState,
+      chromeDelete: DEFAULT_CHROME_DELETE_CONFIG,
     }
   }
 
@@ -176,6 +207,25 @@ function clearTintFromSurface(
   }
 }
 
+function setChromeDeleteOnSurface(
+  surfaceState: LayeredSurfaceState,
+  chromeDeleteConfig: ChromeDeleteConfig,
+): LayeredSurfaceState {
+  return {
+    ...surfaceState,
+    chromeDelete: chromeDeleteConfig,
+  }
+}
+
+function clearChromeDeleteFromSurface(
+  surfaceState: LayeredSurfaceState,
+): LayeredSurfaceState {
+  return {
+    ...surfaceState,
+    chromeDelete: null,
+  }
+}
+
 function getAppliedWrapForTarget(
   appliedDesign: AppliedDesignState,
   targetId: SelectionTargetId,
@@ -219,6 +269,23 @@ function createTintDraft(
   return getAppliedTintForTarget(appliedDesign, targetId) ?? DEFAULT_TINT_CONFIG
 }
 
+function getAppliedChromeDeleteForTarget(
+  appliedDesign: AppliedDesignState,
+  targetId: SelectionTargetId,
+): ChromeDeleteConfig | null {
+  return appliedDesign.parts[targetId]?.chromeDelete ?? null
+}
+
+function createChromeDeleteDraft(
+  appliedDesign: AppliedDesignState,
+  targetId: SelectionTargetId,
+): ChromeDeleteConfig {
+  return (
+    getAppliedChromeDeleteForTarget(appliedDesign, targetId) ??
+    DEFAULT_CHROME_DELETE_CONFIG
+  )
+}
+
 function updateWrapDraft(
   currentWrap: WrapConfig,
   patch: Partial<WrapConfig>,
@@ -242,7 +309,27 @@ function updateTintDraft(
   }
 }
 
+function updateChromeDeleteDraft(
+  currentChromeDelete: ChromeDeleteConfig,
+  patch: Partial<ChromeDeleteConfig>,
+): ChromeDeleteConfig {
+  const finish = patch.finish
+
+  return {
+    color: patch.color ?? currentChromeDelete.color,
+    finish: isChromeDeleteFinish(finish)
+      ? finish
+      : currentChromeDelete.finish,
+  }
+}
+
 function isWrapFinish(finish: WrapFinish | undefined): finish is WrapFinish {
+  return finish === 'gloss' || finish === 'satin' || finish === 'matte'
+}
+
+function isChromeDeleteFinish(
+  finish: ChromeDeleteFinish | undefined,
+): finish is ChromeDeleteFinish {
   return finish === 'gloss' || finish === 'satin' || finish === 'matte'
 }
 
@@ -304,6 +391,44 @@ function clearTintForTargetIds(
   return nextParts
 }
 
+function setChromeDeleteForTargetIds(
+  parts: AppliedDesignState['parts'],
+  targetIds: readonly SelectionTargetId[],
+  chromeDeleteConfig: ChromeDeleteConfig,
+): AppliedDesignState['parts'] {
+  const nextParts: AppliedDesignState['parts'] = {
+    ...parts,
+  }
+
+  for (const targetId of targetIds) {
+    const currentPartState = nextParts[targetId] ?? createLayeredSurfaceState()
+
+    nextParts[targetId] = setChromeDeleteOnSurface(
+      currentPartState,
+      chromeDeleteConfig,
+    )
+  }
+
+  return nextParts
+}
+
+function clearChromeDeleteForTargetIds(
+  parts: AppliedDesignState['parts'],
+  targetIds: readonly SelectionTargetId[],
+): AppliedDesignState['parts'] {
+  const nextParts: AppliedDesignState['parts'] = {
+    ...parts,
+  }
+
+  for (const targetId of targetIds) {
+    const currentPartState = nextParts[targetId] ?? createLayeredSurfaceState()
+
+    nextParts[targetId] = clearChromeDeleteFromSurface(currentPartState)
+  }
+
+  return nextParts
+}
+
 export const initialConfiguratorState: ConfiguratorState = {
   appliedDesign: {
     fullBody: createLayeredSurfaceState(),
@@ -331,6 +456,8 @@ export function configuratorReducer(
         wrapConfig: null,
         tintConfig: null,
         tintScope: null,
+        chromeDeleteConfig: null,
+        chromeDeleteScope: null,
       },
     }
   }
@@ -352,6 +479,17 @@ export function configuratorReducer(
       action.serviceId === 'tint' && defaultTintScope
         ? createTintDraft(state.appliedDesign, state.draftSelection.targetId)
         : null
+    const defaultChromeDeleteScope =
+      action.serviceId === 'chrome-delete'
+        ? getDefaultChromeDeleteScope(state.draftSelection.targetId)
+        : null
+    const chromeDeleteConfig =
+      action.serviceId === 'chrome-delete' && defaultChromeDeleteScope
+        ? createChromeDeleteDraft(
+            state.appliedDesign,
+            state.draftSelection.targetId,
+          )
+        : null
 
     return {
       ...state,
@@ -361,6 +499,8 @@ export function configuratorReducer(
         wrapConfig,
         tintConfig,
         tintScope: defaultTintScope,
+        chromeDeleteConfig,
+        chromeDeleteScope: defaultChromeDeleteScope,
       },
     }
   }
@@ -430,6 +570,54 @@ export function configuratorReducer(
     }
   }
 
+  if (action.type === 'update-chrome-delete-draft') {
+    const draftSelection = state.draftSelection
+
+    if (draftSelection?.serviceId !== 'chrome-delete') {
+      return state
+    }
+
+    const currentChromeDelete =
+      draftSelection.chromeDeleteConfig ??
+      createChromeDeleteDraft(state.appliedDesign, draftSelection.targetId)
+
+    return {
+      ...state,
+      draftSelection: {
+        ...draftSelection,
+        chromeDeleteConfig: updateChromeDeleteDraft(
+          currentChromeDelete,
+          action.patch,
+        ),
+      },
+    }
+  }
+
+  if (action.type === 'update-chrome-delete-scope') {
+    const draftSelection = state.draftSelection
+
+    if (draftSelection?.serviceId !== 'chrome-delete') {
+      return state
+    }
+
+    if (
+      resolveChromeDeleteScopeTargetIds(
+        draftSelection.targetId,
+        action.scope,
+      ).length === 0
+    ) {
+      return state
+    }
+
+    return {
+      ...state,
+      draftSelection: {
+        ...draftSelection,
+        chromeDeleteScope: action.scope,
+      },
+    }
+  }
+
   if (action.type === 'clear-service') {
     if (!state.draftSelection) {
       return state
@@ -443,6 +631,8 @@ export function configuratorReducer(
         wrapConfig: null,
         tintConfig: null,
         tintScope: null,
+        chromeDeleteConfig: null,
+        chromeDeleteScope: null,
       },
     }
   }
@@ -522,6 +712,37 @@ export function configuratorReducer(
             state.appliedDesign.parts,
             tintTargetIds,
             draftSelection.tintConfig,
+          ),
+        },
+        draftSelection: null,
+      }
+    }
+
+    if (draftSelection.serviceId === 'chrome-delete') {
+      if (
+        !draftSelection.chromeDeleteConfig ||
+        !draftSelection.chromeDeleteScope
+      ) {
+        return state
+      }
+
+      const chromeDeleteTargetIds = resolveChromeDeleteScopeTargetIds(
+        draftSelection.targetId,
+        draftSelection.chromeDeleteScope,
+      )
+
+      if (chromeDeleteTargetIds.length === 0) {
+        return state
+      }
+
+      return {
+        ...state,
+        appliedDesign: {
+          ...state.appliedDesign,
+          parts: setChromeDeleteForTargetIds(
+            state.appliedDesign.parts,
+            chromeDeleteTargetIds,
+            draftSelection.chromeDeleteConfig,
           ),
         },
         draftSelection: null,
@@ -630,6 +851,29 @@ export function configuratorReducer(
       appliedDesign: {
         ...state.appliedDesign,
         parts: clearTintForTargetIds(state.appliedDesign.parts, tintTargetIds),
+      },
+      draftSelection: null,
+    }
+  }
+
+  if (action.type === 'reset-chrome-delete') {
+    const chromeDeleteTargetIds = resolveChromeDeleteScopeTargetIds(
+      action.targetId,
+      action.scope,
+    )
+
+    if (chromeDeleteTargetIds.length === 0) {
+      return state
+    }
+
+    return {
+      ...state,
+      appliedDesign: {
+        ...state.appliedDesign,
+        parts: clearChromeDeleteForTargetIds(
+          state.appliedDesign.parts,
+          chromeDeleteTargetIds,
+        ),
       },
       draftSelection: null,
     }
