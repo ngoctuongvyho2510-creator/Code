@@ -16,6 +16,7 @@ import type {
   AppliedDesignState,
   CaliperPaintPreviewState,
   ChromeDeletePreviewState,
+  LightTintPreviewState,
   PowderCoatPreviewState,
   TintPreviewState,
   WrapPreviewState,
@@ -34,6 +35,7 @@ type VehicleViewerProps = {
   appliedDesign: AppliedDesignState
   caliperPaintPreview: CaliperPaintPreviewState | null
   chromeDeletePreview: ChromeDeletePreviewState | null
+  lightTintPreview: LightTintPreviewState | null
   powderCoatPreview: PowderCoatPreviewState | null
   selectedTargetId: string | null
   tintPreview: TintPreviewState | null
@@ -135,6 +137,7 @@ type ViewerSceneProps = {
   appliedDesign: AppliedDesignState
   caliperPaintPreview: CaliperPaintPreviewState | null
   chromeDeletePreview: ChromeDeletePreviewState | null
+  lightTintPreview: LightTintPreviewState | null
   powderCoatPreview: PowderCoatPreviewState | null
   onResetReady: (resetView: () => void) => void
   onPartSelect: (partId: string) => void
@@ -148,6 +151,7 @@ function ViewerScene({
   appliedDesign,
   caliperPaintPreview,
   chromeDeletePreview,
+  lightTintPreview,
   powderCoatPreview,
   onPartSelect,
   onResetReady,
@@ -192,6 +196,7 @@ function ViewerScene({
             caliperPaintPreview={caliperPaintPreview}
             chromeDeletePreview={chromeDeletePreview}
             controlsRef={controlsRef}
+            lightTintPreview={lightTintPreview}
             powderCoatPreview={powderCoatPreview}
             selectedTargetId={selectedTargetId}
             tintPreview={tintPreview}
@@ -211,6 +216,7 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
       appliedDesign,
       caliperPaintPreview,
       chromeDeletePreview,
+      lightTintPreview,
       powderCoatPreview,
       onPartSelect,
       onScenePointerMissed,
@@ -260,6 +266,7 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
             appliedDesign={appliedDesign}
             caliperPaintPreview={caliperPaintPreview}
             chromeDeletePreview={chromeDeletePreview}
+            lightTintPreview={lightTintPreview}
             powderCoatPreview={powderCoatPreview}
             selectedTargetId={selectedTargetId}
             tintPreview={tintPreview}

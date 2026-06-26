@@ -3,11 +3,13 @@ import {
   FULL_BODY_TARGET_ID,
   getDefaultCaliperPaintScope,
   getDefaultChromeDeleteScope,
+  getDefaultLightTintScope,
   getDefaultPowderCoatScope,
   getDefaultTintScope,
   getSelectionTarget,
   resolveCaliperPaintScopeTargetIds,
   resolveChromeDeleteScopeTargetIds,
+  resolveLightTintScopeTargetIds,
   resolvePowderCoatScopeTargetIds,
   resolveTintScopeTargetIds,
 } from '../config/vehicleParts'
@@ -21,6 +23,8 @@ import type {
   ChromeDeleteScope,
   DraftSelectionState,
   LayeredSurfaceState,
+  LightTintConfig,
+  LightTintScope,
   PowderCoatConfig,
   PowderCoatFinish,
   PowderCoatScope,
@@ -39,6 +43,10 @@ const DEFAULT_WRAP_CONFIG: WrapConfig = {
 
 const DEFAULT_TINT_CONFIG: TintConfig = {
   vlt: 35,
+}
+
+const DEFAULT_LIGHT_TINT_CONFIG: LightTintConfig = {
+  darkness: 25,
 }
 
 const DEFAULT_CHROME_DELETE_CONFIG: ChromeDeleteConfig = {
@@ -81,6 +89,14 @@ export type ConfiguratorAction =
   | {
       type: 'update-tint-scope'
       scope: TintScope
+    }
+  | {
+      type: 'update-light-tint-draft'
+      patch: Partial<LightTintConfig>
+    }
+  | {
+      type: 'update-light-tint-scope'
+      scope: LightTintScope
     }
   | {
       type: 'update-chrome-delete-draft'
@@ -128,6 +144,11 @@ export type ConfiguratorAction =
       scope: TintScope
     }
   | {
+      type: 'reset-light-tint'
+      targetId: SelectionTargetId
+      scope: LightTintScope
+    }
+  | {
       type: 'reset-chrome-delete'
       targetId: SelectionTargetId
       scope: ChromeDeleteScope
@@ -150,6 +171,7 @@ function createLayeredSurfaceState(): LayeredSurfaceState {
   return {
     wrap: null,
     tint: null,
+    lightTint: null,
     chromeDelete: null,
     caliperPaint: null,
     powderCoat: null,
@@ -269,6 +291,25 @@ function clearTintFromSurface(
   }
 }
 
+function setLightTintOnSurface(
+  surfaceState: LayeredSurfaceState,
+  lightTintConfig: LightTintConfig,
+): LayeredSurfaceState {
+  return {
+    ...surfaceState,
+    lightTint: lightTintConfig,
+  }
+}
+
+function clearLightTintFromSurface(
+  surfaceState: LayeredSurfaceState,
+): LayeredSurfaceState {
+  return {
+    ...surfaceState,
+    lightTint: null,
+  }
+}
+
 function setChromeDeleteOnSurface(
   surfaceState: LayeredSurfaceState,
   chromeDeleteConfig: ChromeDeleteConfig,
@@ -369,6 +410,23 @@ function createTintDraft(
   return getAppliedTintForTarget(appliedDesign, targetId) ?? DEFAULT_TINT_CONFIG
 }
 
+function getAppliedLightTintForTarget(
+  appliedDesign: AppliedDesignState,
+  targetId: SelectionTargetId,
+): LightTintConfig | null {
+  return appliedDesign.parts[targetId]?.lightTint ?? null
+}
+
+function createLightTintDraft(
+  appliedDesign: AppliedDesignState,
+  targetId: SelectionTargetId,
+): LightTintConfig {
+  return (
+    getAppliedLightTintForTarget(appliedDesign, targetId) ??
+    DEFAULT_LIGHT_TINT_CONFIG
+  )
+}
+
 function getAppliedChromeDeleteForTarget(
   appliedDesign: AppliedDesignState,
   targetId: SelectionTargetId,
@@ -440,6 +498,17 @@ function updateTintDraft(
 
   return {
     vlt: clampTintVlt(patchedVlt),
+  }
+}
+
+function updateLightTintDraft(
+  currentLightTint: LightTintConfig,
+  patch: Partial<LightTintConfig>,
+): LightTintConfig {
+  const patchedDarkness = patch.darkness ?? currentLightTint.darkness
+
+  return {
+    darkness: clampLightTintDarkness(patchedDarkness),
   }
 }
 
@@ -515,6 +584,14 @@ function clampTintVlt(vlt: number): number {
   return Math.min(100, Math.max(5, Math.round(vlt)))
 }
 
+function clampLightTintDarkness(darkness: number): number {
+  if (!Number.isFinite(darkness)) {
+    return DEFAULT_LIGHT_TINT_CONFIG.darkness
+  }
+
+  return Math.min(100, Math.max(0, Math.round(darkness)))
+}
+
 function clearFullBodyPartWraps(
   parts: AppliedDesignState['parts'],
 ): AppliedDesignState['parts'] {
@@ -560,6 +637,44 @@ function clearTintForTargetIds(
     const currentPartState = nextParts[targetId] ?? createLayeredSurfaceState()
 
     nextParts[targetId] = clearTintFromSurface(currentPartState)
+  }
+
+  return nextParts
+}
+
+function setLightTintForTargetIds(
+  parts: AppliedDesignState['parts'],
+  targetIds: readonly SelectionTargetId[],
+  lightTintConfig: LightTintConfig,
+): AppliedDesignState['parts'] {
+  const nextParts: AppliedDesignState['parts'] = {
+    ...parts,
+  }
+
+  for (const targetId of targetIds) {
+    const currentPartState = nextParts[targetId] ?? createLayeredSurfaceState()
+
+    nextParts[targetId] = setLightTintOnSurface(
+      currentPartState,
+      lightTintConfig,
+    )
+  }
+
+  return nextParts
+}
+
+function clearLightTintForTargetIds(
+  parts: AppliedDesignState['parts'],
+  targetIds: readonly SelectionTargetId[],
+): AppliedDesignState['parts'] {
+  const nextParts: AppliedDesignState['parts'] = {
+    ...parts,
+  }
+
+  for (const targetId of targetIds) {
+    const currentPartState = nextParts[targetId] ?? createLayeredSurfaceState()
+
+    nextParts[targetId] = clearLightTintFromSurface(currentPartState)
   }
 
   return nextParts
@@ -706,6 +821,8 @@ export function configuratorReducer(
         wrapConfig: null,
         tintConfig: null,
         tintScope: null,
+        lightTintConfig: null,
+        lightTintScope: null,
         chromeDeleteConfig: null,
         chromeDeleteScope: null,
         caliperPaintConfig: null,
@@ -732,6 +849,17 @@ export function configuratorReducer(
     const tintConfig =
       action.serviceId === 'tint' && defaultTintScope
         ? createTintDraft(state.appliedDesign, state.draftSelection.targetId)
+        : null
+    const defaultLightTintScope =
+      action.serviceId === 'tint'
+        ? getDefaultLightTintScope(state.draftSelection.targetId)
+        : null
+    const lightTintConfig =
+      action.serviceId === 'tint' && defaultLightTintScope
+        ? createLightTintDraft(
+            state.appliedDesign,
+            state.draftSelection.targetId,
+          )
         : null
     const defaultChromeDeleteScope =
       action.serviceId === 'chrome-delete'
@@ -775,6 +903,8 @@ export function configuratorReducer(
         wrapConfig,
         tintConfig,
         tintScope: defaultTintScope,
+        lightTintConfig,
+        lightTintScope: defaultLightTintScope,
         chromeDeleteConfig,
         chromeDeleteScope: defaultChromeDeleteScope,
         caliperPaintConfig,
@@ -808,7 +938,7 @@ export function configuratorReducer(
   if (action.type === 'update-tint-draft') {
     const draftSelection = state.draftSelection
 
-    if (draftSelection?.serviceId !== 'tint') {
+    if (draftSelection?.serviceId !== 'tint' || !draftSelection.tintScope) {
       return state
     }
 
@@ -828,7 +958,7 @@ export function configuratorReducer(
   if (action.type === 'update-tint-scope') {
     const draftSelection = state.draftSelection
 
-    if (draftSelection?.serviceId !== 'tint') {
+    if (draftSelection?.serviceId !== 'tint' || !draftSelection.tintConfig) {
       return state
     }
 
@@ -846,6 +976,54 @@ export function configuratorReducer(
       draftSelection: {
         ...draftSelection,
         tintScope: action.scope,
+      },
+    }
+  }
+
+  if (action.type === 'update-light-tint-draft') {
+    const draftSelection = state.draftSelection
+
+    if (draftSelection?.serviceId !== 'tint' || !draftSelection.lightTintScope) {
+      return state
+    }
+
+    const currentLightTint =
+      draftSelection.lightTintConfig ??
+      createLightTintDraft(state.appliedDesign, draftSelection.targetId)
+
+    return {
+      ...state,
+      draftSelection: {
+        ...draftSelection,
+        lightTintConfig: updateLightTintDraft(
+          currentLightTint,
+          action.patch,
+        ),
+      },
+    }
+  }
+
+  if (action.type === 'update-light-tint-scope') {
+    const draftSelection = state.draftSelection
+
+    if (draftSelection?.serviceId !== 'tint' || !draftSelection.lightTintConfig) {
+      return state
+    }
+
+    if (
+      resolveLightTintScopeTargetIds(
+        draftSelection.targetId,
+        action.scope,
+      ).length === 0
+    ) {
+      return state
+    }
+
+    return {
+      ...state,
+      draftSelection: {
+        ...draftSelection,
+        lightTintScope: action.scope,
       },
     }
   }
@@ -1007,6 +1185,8 @@ export function configuratorReducer(
         wrapConfig: null,
         tintConfig: null,
         tintScope: null,
+        lightTintConfig: null,
+        lightTintScope: null,
         chromeDeleteConfig: null,
         chromeDeleteScope: null,
         caliperPaintConfig: null,
@@ -1071,31 +1251,55 @@ export function configuratorReducer(
     }
 
     if (draftSelection.serviceId === 'tint') {
-      if (!draftSelection.tintConfig || !draftSelection.tintScope) {
-        return state
+      if (draftSelection.tintConfig && draftSelection.tintScope) {
+        const tintTargetIds = resolveTintScopeTargetIds(
+          draftSelection.targetId,
+          draftSelection.tintScope,
+        )
+
+        if (tintTargetIds.length === 0) {
+          return state
+        }
+
+        return {
+          ...state,
+          appliedDesign: {
+            ...state.appliedDesign,
+            parts: setTintForTargetIds(
+              state.appliedDesign.parts,
+              tintTargetIds,
+              draftSelection.tintConfig,
+            ),
+          },
+          draftSelection: null,
+        }
       }
 
-      const tintTargetIds = resolveTintScopeTargetIds(
-        draftSelection.targetId,
-        draftSelection.tintScope,
-      )
+      if (draftSelection.lightTintConfig && draftSelection.lightTintScope) {
+        const lightTintTargetIds = resolveLightTintScopeTargetIds(
+          draftSelection.targetId,
+          draftSelection.lightTintScope,
+        )
 
-      if (tintTargetIds.length === 0) {
-        return state
+        if (lightTintTargetIds.length === 0) {
+          return state
+        }
+
+        return {
+          ...state,
+          appliedDesign: {
+            ...state.appliedDesign,
+            parts: setLightTintForTargetIds(
+              state.appliedDesign.parts,
+              lightTintTargetIds,
+              draftSelection.lightTintConfig,
+            ),
+          },
+          draftSelection: null,
+        }
       }
 
-      return {
-        ...state,
-        appliedDesign: {
-          ...state.appliedDesign,
-          parts: setTintForTargetIds(
-            state.appliedDesign.parts,
-            tintTargetIds,
-            draftSelection.tintConfig,
-          ),
-        },
-        draftSelection: null,
-      }
+      return state
     }
 
     if (draftSelection.serviceId === 'chrome-delete') {
@@ -1287,6 +1491,29 @@ export function configuratorReducer(
       appliedDesign: {
         ...state.appliedDesign,
         parts: clearTintForTargetIds(state.appliedDesign.parts, tintTargetIds),
+      },
+      draftSelection: null,
+    }
+  }
+
+  if (action.type === 'reset-light-tint') {
+    const lightTintTargetIds = resolveLightTintScopeTargetIds(
+      action.targetId,
+      action.scope,
+    )
+
+    if (lightTintTargetIds.length === 0) {
+      return state
+    }
+
+    return {
+      ...state,
+      appliedDesign: {
+        ...state.appliedDesign,
+        parts: clearLightTintForTargetIds(
+          state.appliedDesign.parts,
+          lightTintTargetIds,
+        ),
       },
       draftSelection: null,
     }

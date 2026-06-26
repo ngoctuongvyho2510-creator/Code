@@ -78,6 +78,17 @@ export type TintConfig = {
   vlt: number
 }
 
+export type LightTintScope = 'this' | 'both'
+
+export type LightTintScopeOption = {
+  id: LightTintScope
+  label: string
+}
+
+export type LightTintConfig = {
+  darkness: number
+}
+
 export type ChromeDeleteFinish = 'gloss' | 'satin' | 'matte'
 
 export type ChromeDeleteScope = 'this' | 'both' | 'all-chrome'
@@ -127,6 +138,7 @@ export type AppliedServiceState = {
 export type LayeredSurfaceState = {
   wrap: WrapConfig | null
   tint: TintConfig | null
+  lightTint: LightTintConfig | null
   chromeDelete: ChromeDeleteConfig | null
   caliperPaint: CaliperPaintConfig | null
   powderCoat: PowderCoatConfig | null
@@ -147,6 +159,8 @@ export type DraftSelectionState = {
   wrapConfig: WrapConfig | null
   tintConfig: TintConfig | null
   tintScope: TintScope | null
+  lightTintConfig: LightTintConfig | null
+  lightTintScope: LightTintScope | null
   chromeDeleteConfig: ChromeDeleteConfig | null
   chromeDeleteScope: ChromeDeleteScope | null
   caliperPaintConfig: CaliperPaintConfig | null
@@ -163,6 +177,11 @@ export type WrapPreviewState = {
 export type TintPreviewState = {
   targetIds: readonly SelectionTargetId[]
   tint: TintConfig
+}
+
+export type LightTintPreviewState = {
+  targetIds: readonly SelectionTargetId[]
+  lightTint: LightTintConfig
 }
 
 export type ChromeDeletePreviewState = {

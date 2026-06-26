@@ -3,6 +3,8 @@ import type {
   CaliperPaintScopeOption,
   ChromeDeleteScope,
   ChromeDeleteScopeOption,
+  LightTintScope,
+  LightTintScopeOption,
   PartGroup,
   PowderCoatScope,
   PowderCoatScopeOption,
@@ -46,8 +48,8 @@ const WHEEL_SERVICES = ['powder-coat', 'ceramic'] as const satisfies readonly Se
 const CENTER_CAP_SERVICES = ['wrap'] as const satisfies readonly ServiceId[]
 const CALIPER_SERVICES = ['caliper-paint'] as const satisfies readonly ServiceId[]
 const BRAKE_DISC_SERVICES = ['performance'] as const satisfies readonly ServiceId[]
-const LAMP_SERVICES = ['ppf', 'ceramic'] as const satisfies readonly ServiceId[]
-const SIGNAL_SERVICES = ['ppf'] as const satisfies readonly ServiceId[]
+const LAMP_SERVICES = ['tint', 'ppf', 'ceramic'] as const satisfies readonly ServiceId[]
+const SIGNAL_SERVICES = ['tint', 'ppf'] as const satisfies readonly ServiceId[]
 const EXHAUST_SERVICES = ['ceramic'] as const satisfies readonly ServiceId[]
 const WIPER_SERVICES = ['wrap'] as const satisfies readonly ServiceId[]
 
@@ -83,6 +85,17 @@ export const POWDER_COAT_PART_IDS = [
   'wheel-front-right',
   'wheel-rear-left',
   'wheel-rear-right',
+] as const
+
+export const LIGHT_TINT_PART_IDS = [
+  'headlight-left',
+  'headlight-right',
+  'taillight-left',
+  'taillight-right',
+  'fog-light-left',
+  'fog-light-right',
+  'mirror-signal-left',
+  'mirror-signal-right',
 ] as const
 
 const FRONT_SIDE_TINT_PART_IDS = [
@@ -136,6 +149,26 @@ const REAR_POWDER_COAT_PART_IDS = [
   'wheel-rear-right',
 ] as const
 
+const HEADLIGHT_TINT_PART_IDS = [
+  'headlight-left',
+  'headlight-right',
+] as const
+
+const TAILLIGHT_TINT_PART_IDS = [
+  'taillight-left',
+  'taillight-right',
+] as const
+
+const FOG_LIGHT_TINT_PART_IDS = [
+  'fog-light-left',
+  'fog-light-right',
+] as const
+
+const MIRROR_SIGNAL_TINT_PART_IDS = [
+  'mirror-signal-left',
+  'mirror-signal-right',
+] as const
+
 const tintScopeLabels = {
   this: 'This',
   pair: 'Pair',
@@ -162,6 +195,11 @@ const powderCoatScopeLabels = {
   rear: 'Rear',
   all: 'All',
 } as const satisfies Record<PowderCoatScope, string>
+
+const lightTintScopeLabels = {
+  this: 'This',
+  both: 'Both',
+} as const satisfies Record<LightTintScope, string>
 
 const tintScopesByPartId = {
   windshield: ['this', 'all'],
@@ -227,6 +265,34 @@ const powderCoatScopesByPartId = {
 } as const satisfies Record<
   (typeof POWDER_COAT_PART_IDS)[number],
   readonly PowderCoatScope[]
+>
+
+const lightTintScopesByPartId = {
+  'headlight-left': ['this', 'both'],
+  'headlight-right': ['this', 'both'],
+  'taillight-left': ['this', 'both'],
+  'taillight-right': ['this', 'both'],
+  'fog-light-left': ['this', 'both'],
+  'fog-light-right': ['this', 'both'],
+  'mirror-signal-left': ['this', 'both'],
+  'mirror-signal-right': ['this', 'both'],
+} as const satisfies Record<
+  (typeof LIGHT_TINT_PART_IDS)[number],
+  readonly LightTintScope[]
+>
+
+const lightTintBothPartIdsByPartId = {
+  'headlight-left': HEADLIGHT_TINT_PART_IDS,
+  'headlight-right': HEADLIGHT_TINT_PART_IDS,
+  'taillight-left': TAILLIGHT_TINT_PART_IDS,
+  'taillight-right': TAILLIGHT_TINT_PART_IDS,
+  'fog-light-left': FOG_LIGHT_TINT_PART_IDS,
+  'fog-light-right': FOG_LIGHT_TINT_PART_IDS,
+  'mirror-signal-left': MIRROR_SIGNAL_TINT_PART_IDS,
+  'mirror-signal-right': MIRROR_SIGNAL_TINT_PART_IDS,
+} as const satisfies Record<
+  (typeof LIGHT_TINT_PART_IDS)[number],
+  readonly string[]
 >
 
 export const FULL_BODY_MESH_NAMES = [
@@ -375,14 +441,14 @@ export const VEHICLE_PARTS = [
   vehiclePart('brake-disc-rear-left', 'Disc RL', ['MW_BRAKE_DISC_RL'], 'brake-disc', BRAKE_DISC_SERVICES, 'brake'),
   vehiclePart('brake-disc-rear-right', 'Disc RR', ['MW_BRAKE_DISC_RR'], 'brake-disc', BRAKE_DISC_SERVICES, 'brake'),
 
-  vehiclePart('headlight-left', 'Headlight L', ['MW_LIGHT_HEADLIGHT_L'], 'light', LAMP_SERVICES, 'light'),
-  vehiclePart('headlight-right', 'Headlight R', ['MW_LIGHT_HEADLIGHT_R'], 'light', LAMP_SERVICES, 'light'),
-  vehiclePart('taillight-left', 'Taillight L', ['MW_LIGHT_TAILLIGHT_OUTER_L', 'MW_LIGHT_TAILLIGHT_TRUNK_L'], 'light', LAMP_SERVICES, 'light'),
-  vehiclePart('taillight-right', 'Taillight R', ['MW_LIGHT_TAILLIGHT_OUTER_R', 'MW_LIGHT_TAILLIGHT_TRUNK_R'], 'light', LAMP_SERVICES, 'light'),
-  vehiclePart('fog-light-left', 'Fog L', ['MW_LIGHT_FOG_L'], 'light', SIGNAL_SERVICES, 'light'),
-  vehiclePart('fog-light-right', 'Fog R', ['MW_LIGHT_FOG_R'], 'light', SIGNAL_SERVICES, 'light'),
-  vehiclePart('mirror-signal-left', 'Signal L', ['MW_LIGHT_MIRROR_TURN_SIGNAL_L'], 'light', SIGNAL_SERVICES, 'light'),
-  vehiclePart('mirror-signal-right', 'Signal R', ['MW_LIGHT_MIRROR_TURN_SIGNAL_R'], 'light', SIGNAL_SERVICES, 'light'),
+  vehiclePart('headlight-left', 'Left Headlight', ['MW_LIGHT_HEADLIGHT_L'], 'light', LAMP_SERVICES, 'light'),
+  vehiclePart('headlight-right', 'Right Headlight', ['MW_LIGHT_HEADLIGHT_R'], 'light', LAMP_SERVICES, 'light'),
+  vehiclePart('taillight-left', 'Left Taillight', ['MW_LIGHT_TAILLIGHT_OUTER_L', 'MW_LIGHT_TAILLIGHT_TRUNK_L'], 'light', LAMP_SERVICES, 'light'),
+  vehiclePart('taillight-right', 'Right Taillight', ['MW_LIGHT_TAILLIGHT_OUTER_R', 'MW_LIGHT_TAILLIGHT_TRUNK_R'], 'light', LAMP_SERVICES, 'light'),
+  vehiclePart('fog-light-left', 'Left Fog Light', ['MW_LIGHT_FOG_L'], 'light', SIGNAL_SERVICES, 'light'),
+  vehiclePart('fog-light-right', 'Right Fog Light', ['MW_LIGHT_FOG_R'], 'light', SIGNAL_SERVICES, 'light'),
+  vehiclePart('mirror-signal-left', 'Left Mirror Signal', ['MW_LIGHT_MIRROR_TURN_SIGNAL_L'], 'light', SIGNAL_SERVICES, 'light'),
+  vehiclePart('mirror-signal-right', 'Right Mirror Signal', ['MW_LIGHT_MIRROR_TURN_SIGNAL_R'], 'light', SIGNAL_SERVICES, 'light'),
 
   vehiclePart('exhaust-left', 'Exhaust L', ['MW_PART_EXHAUST_TIP_L_INNER', 'MW_PART_EXHAUST_TIP_L_OUTER'], 'exhaust', EXHAUST_SERVICES, 'exhaust'),
   vehiclePart('exhaust-right', 'Exhaust R', ['MW_PART_EXHAUST_TIP_R_INNER', 'MW_PART_EXHAUST_TIP_R_OUTER'], 'exhaust', EXHAUST_SERVICES, 'exhaust'),
@@ -431,6 +497,10 @@ export const CALIPER_PAINT_MESH_NAMES = CALIPER_PAINT_PART_IDS.flatMap(
 )
 
 export const POWDER_COAT_MESH_NAMES = POWDER_COAT_PART_IDS.flatMap(
+  (partId) => partById.get(partId)?.meshNames ?? [],
+)
+
+export const LIGHT_TINT_MESH_NAMES = LIGHT_TINT_PART_IDS.flatMap(
   (partId) => partById.get(partId)?.meshNames ?? [],
 )
 
@@ -607,6 +677,58 @@ export function resolvePowderCoatScopeTargetIds(
   }
 
   return POWDER_COAT_PART_IDS
+}
+
+export function isLightTintTarget(targetId: string): boolean {
+  return LIGHT_TINT_PART_IDS.includes(
+    targetId as (typeof LIGHT_TINT_PART_IDS)[number],
+  )
+}
+
+export function getDefaultLightTintScope(
+  targetId: string,
+): LightTintScope | null {
+  return getLightTintScopeOptions(targetId)[0]?.id ?? null
+}
+
+export function getLightTintScopeOptions(
+  targetId: string,
+): readonly LightTintScopeOption[] {
+  if (!isLightTintTarget(targetId)) {
+    return []
+  }
+
+  const partId = targetId as (typeof LIGHT_TINT_PART_IDS)[number]
+
+  return lightTintScopesByPartId[partId].map((scope) => ({
+    id: scope,
+    label: lightTintScopeLabels[scope],
+  }))
+}
+
+export function resolveLightTintScopeTargetIds(
+  targetId: string,
+  scope: LightTintScope,
+): readonly string[] {
+  if (!isLightTintTarget(targetId)) {
+    return []
+  }
+
+  const validScopes = lightTintScopesByPartId[
+    targetId as (typeof LIGHT_TINT_PART_IDS)[number]
+  ]
+
+  if (!(validScopes as readonly LightTintScope[]).includes(scope)) {
+    return []
+  }
+
+  if (scope === 'this') {
+    return [targetId]
+  }
+
+  return lightTintBothPartIdsByPartId[
+    targetId as (typeof LIGHT_TINT_PART_IDS)[number]
+  ]
 }
 
 export function isTintableGlassTarget(targetId: string): boolean {
