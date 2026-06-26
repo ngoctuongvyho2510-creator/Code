@@ -11,6 +11,8 @@ import type {
   ChromeDeleteFinish,
   ChromeDeleteScope,
   ChromeDeleteScopeOption,
+  FreeArtworkDraftState,
+  FreeArtworkItem,
   LightTintConfig,
   LightTintScope,
   LightTintScopeOption,
@@ -75,10 +77,20 @@ const supportedArtworkMimeTypes = new Set([
 const lowResolutionShortEdgeThreshold = 256
 const lowResolutionLongEdgeThreshold = 600
 
+type ArtworkFileLoadResult = {
+  imageSource: string
+  fileName: string
+  imageWidth: number
+  imageHeight: number
+  aspectRatio: number
+}
+
 type PartServicePopupProps = {
   target: VehiclePartDefinition
   selectedServiceId: ServiceId | null
   artworkConfig: ArtworkDraftState | null
+  freeArtworkConfig: FreeArtworkDraftState | null
+  selectedFreeArtworkItem: FreeArtworkItem | null
   caliperPaintConfig: CaliperPaintConfig | null
   caliperPaintScope: CaliperPaintScope | null
   caliperPaintScopeOptions: readonly CaliperPaintScopeOption[]
@@ -119,8 +131,18 @@ type PartServicePopupProps = {
   onResetWrap: () => void
   onRemoveArtwork: () => void
   onRemoveAllArtwork: () => void
+  onAddFreeArtwork: () => void
+  onDeleteAllFreeArtwork: () => void
+  onDeleteFreeArtwork: (artworkId: string) => void
+  onDuplicateFreeArtwork: (artworkId: string) => void
+  onSelectFreeArtwork: (artworkId: string) => void
   onSelectService: (serviceId: ServiceId) => void
   onUpdateArtworkDraft: (patch: Partial<ArtworkDraftState>) => void
+  onUpdateFreeArtworkItem: (
+    artworkId: string,
+    patch: Partial<FreeArtworkItem>,
+  ) => void
+  onUpdateFreeArtworkUpload: (patch: Partial<FreeArtworkDraftState>) => void
   onUpdateCaliperPaintDraft: (patch: Partial<CaliperPaintConfig>) => void
   onUpdateCaliperPaintScope: (scope: CaliperPaintScope) => void
   onUpdatePowderCoatDraft: (patch: Partial<PowderCoatConfig>) => void
@@ -136,6 +158,7 @@ type PartServicePopupProps = {
 
 export function PartServicePopup({
   artworkConfig,
+  freeArtworkConfig,
   canApplyAllWraps,
   canRemoveAllArtwork,
   canRemoveArtwork,
@@ -158,6 +181,7 @@ export function PartServicePopup({
   chromeDeleteConfig,
   chromeDeleteScope,
   chromeDeleteScopeOptions,
+  selectedFreeArtworkItem,
   target,
   selectedServiceId,
   tintConfig,
@@ -178,8 +202,15 @@ export function PartServicePopup({
   onResetWrap,
   onRemoveAllArtwork,
   onRemoveArtwork,
+  onAddFreeArtwork,
+  onDeleteAllFreeArtwork,
+  onDeleteFreeArtwork,
+  onDuplicateFreeArtwork,
+  onSelectFreeArtwork,
   onSelectService,
   onUpdateArtworkDraft,
+  onUpdateFreeArtworkItem,
+  onUpdateFreeArtworkUpload,
   onUpdateCaliperPaintDraft,
   onUpdateCaliperPaintScope,
   onUpdatePowderCoatDraft,
@@ -213,6 +244,8 @@ export function PartServicePopup({
     powderCoatScope !== null
   const showArtworkEditor =
     selectedServiceId === 'artwork' && artworkConfig !== null
+  const showFreeArtEditor =
+    selectedServiceId === 'free-art' && freeArtworkConfig !== null
   const showServiceList =
     !showWrapEditor &&
     !showTintEditor &&
@@ -220,7 +253,8 @@ export function PartServicePopup({
     !showChromeDeleteEditor &&
     !showCaliperPaintEditor &&
     !showPowderCoatEditor &&
-    !showArtworkEditor
+    !showArtworkEditor &&
+    !showFreeArtEditor
   const syncedHexValue = wrapConfig?.color.toUpperCase() ?? '#C49D59'
   const syncedChromeDeleteHexValue =
     chromeDeleteConfig?.color.toUpperCase() ?? '#050505'
@@ -456,7 +490,11 @@ export function PartServicePopup({
     )
   }
 
-  function handleArtworkUpload(fileList: FileList | null) {
+  function readArtworkFile(
+    fileList: FileList | null,
+    onLoad: (result: ArtworkFileLoadResult) => void,
+    onError: (message: string) => void,
+  ) {
     const file = fileList?.[0]
 
     if (!file) {
@@ -464,74 +502,37 @@ export function PartServicePopup({
     }
 
     if (!supportedArtworkMimeTypes.has(file.type)) {
-      onUpdateArtworkDraft({
-        imageSource: null,
-        fileName: '',
-        imageWidth: 0,
-        imageHeight: 0,
-        aspectRatio: 1,
-        lowResolution: false,
-        error: 'Unsupported file type',
-      })
+      onError('Unsupported file type')
       return
     }
 
     const reader = new FileReader()
 
     reader.onerror = () => {
-      onUpdateArtworkDraft({
-        imageSource: null,
-        fileName: '',
-        imageWidth: 0,
-        imageHeight: 0,
-        aspectRatio: 1,
-        lowResolution: false,
-        error: 'Upload failed',
-      })
+      onError('Upload failed')
     }
 
     reader.onload = () => {
       const imageSource = reader.result
 
       if (typeof imageSource !== 'string') {
-        onUpdateArtworkDraft({
-          imageSource: null,
-          fileName: '',
-          imageWidth: 0,
-          imageHeight: 0,
-          aspectRatio: 1,
-          lowResolution: false,
-          error: 'Upload failed',
-        })
+        onError('Upload failed')
         return
       }
 
       const image = new Image()
 
       image.onerror = () => {
-        onUpdateArtworkDraft({
-          imageSource: null,
-          fileName: '',
-          imageWidth: 0,
-          imageHeight: 0,
-          aspectRatio: 1,
-          lowResolution: false,
-          error: 'Upload failed',
-        })
+        onError('Upload failed')
       }
 
       image.onload = () => {
-        onUpdateArtworkDraft({
+        onLoad({
           imageSource,
           fileName: file.name,
           imageWidth: image.naturalWidth,
           imageHeight: image.naturalHeight,
           aspectRatio: image.naturalWidth / image.naturalHeight,
-          lowResolution: isLowResolutionArtwork(
-            image.naturalWidth,
-            image.naturalHeight,
-          ),
-          error: null,
         })
       }
 
@@ -539,6 +540,68 @@ export function PartServicePopup({
     }
 
     reader.readAsDataURL(file)
+  }
+
+  function handleArtworkUpload(fileList: FileList | null) {
+    readArtworkFile(
+      fileList,
+      (result) => {
+        onUpdateArtworkDraft({
+          imageSource: result.imageSource,
+          fileName: result.fileName,
+          imageWidth: result.imageWidth,
+          imageHeight: result.imageHeight,
+          aspectRatio: result.aspectRatio,
+          lowResolution: isLowResolutionArtwork(
+            result.imageWidth,
+            result.imageHeight,
+          ),
+          error: null,
+        })
+      },
+      (message) => {
+        onUpdateArtworkDraft({
+          imageSource: null,
+          fileName: '',
+          imageWidth: 0,
+          imageHeight: 0,
+          aspectRatio: 1,
+          lowResolution: false,
+          error: message,
+        })
+      },
+    )
+  }
+
+  function handleFreeArtworkUpload(fileList: FileList | null) {
+    readArtworkFile(
+      fileList,
+      (result) => {
+        onUpdateFreeArtworkUpload({
+          pendingImageSource: result.imageSource,
+          pendingFileName: result.fileName,
+          pendingImageWidth: result.imageWidth,
+          pendingImageHeight: result.imageHeight,
+          pendingAspectRatio: result.aspectRatio,
+          lowResolution: isLowResolutionArtwork(
+            result.imageWidth,
+            result.imageHeight,
+          ),
+          error: null,
+        })
+      },
+      (message) => {
+        onUpdateFreeArtworkUpload({
+          pendingImageSource: null,
+          pendingFileName: '',
+          pendingImageWidth: 0,
+          pendingImageHeight: 0,
+          pendingAspectRatio: 1,
+          lowResolution: false,
+          error: message,
+        })
+      },
+    )
   }
 
   function handleArtworkModeSelect(mode: ArtworkMode) {
@@ -550,6 +613,13 @@ export function PartServicePopup({
       offsetY: 0,
     })
   }
+
+  const selectedFreeArtworkIndex =
+    freeArtworkConfig && selectedFreeArtworkItem
+      ? freeArtworkConfig.items.findIndex(
+          (item) => item.id === selectedFreeArtworkItem.id,
+        )
+      : -1
 
   return (
     <section
@@ -1138,6 +1208,123 @@ export function PartServicePopup({
         </div>
       ) : null}
 
+      {showFreeArtEditor && freeArtworkConfig ? (
+        <div className="part-popup-wrap" aria-label="Free Art options">
+          <label className="part-popup-field">
+            <span>Upload</span>
+            <input
+              type="file"
+              className="part-popup-file-input"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={(event) =>
+                handleFreeArtworkUpload(event.currentTarget.files)
+              }
+            />
+          </label>
+
+          {freeArtworkConfig.error ? (
+            <p className="part-popup-warning" role="alert">
+              {freeArtworkConfig.error}
+            </p>
+          ) : null}
+
+          {freeArtworkConfig.lowResolution ? (
+            <p className="part-popup-warning">Low Resolution</p>
+          ) : null}
+
+          {freeArtworkConfig.pendingFileName ? (
+            <p className="part-popup-file-name">
+              {freeArtworkConfig.pendingFileName}
+            </p>
+          ) : null}
+
+          <button
+            type="button"
+            className="part-popup-apply part-popup-add"
+            disabled={!freeArtworkConfig.pendingImageSource}
+            onClick={onAddFreeArtwork}
+          >
+            Add
+          </button>
+
+          {freeArtworkConfig.items.length > 0 ? (
+            <div>
+              <p className="part-popup-finish-label">Place</p>
+              <div className="part-popup-finish-grid" aria-label="Free Art items">
+                {freeArtworkConfig.items.map((item, index) => (
+                  <button
+                    type="button"
+                    className="part-popup-finish"
+                    data-selected={
+                      freeArtworkConfig.selectedItemId === item.id
+                    }
+                    key={item.id}
+                    onClick={() => onSelectFreeArtwork(item.id)}
+                  >
+                    {index + 1}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {selectedFreeArtworkItem ? (
+            <>
+              <p className="part-popup-file-name">
+                {selectedFreeArtworkIndex >= 0
+                  ? `Item ${selectedFreeArtworkIndex + 1}: `
+                  : ''}
+                {selectedFreeArtworkItem.fileName}
+              </p>
+
+              <label className="part-popup-field">
+                <span>Size</span>
+                <div className="part-popup-tint-custom-row">
+                  <input
+                    type="range"
+                    className="part-popup-vlt-input"
+                    min={0.16}
+                    max={5}
+                    step={0.04}
+                    value={selectedFreeArtworkItem.uniformScale}
+                    onChange={(event) =>
+                      onUpdateFreeArtworkItem(selectedFreeArtworkItem.id, {
+                        uniformScale: Number(event.currentTarget.value),
+                      })
+                    }
+                  />
+                  <span className="part-popup-color-value">
+                    {selectedFreeArtworkItem.uniformScale.toFixed(2)}
+                  </span>
+                </div>
+              </label>
+
+              <label className="part-popup-field">
+                <span>Rotate</span>
+                <div className="part-popup-tint-custom-row">
+                  <input
+                    type="range"
+                    className="part-popup-vlt-input"
+                    min={-180}
+                    max={180}
+                    step={1}
+                    value={selectedFreeArtworkItem.rotation}
+                    onChange={(event) =>
+                      onUpdateFreeArtworkItem(selectedFreeArtworkItem.id, {
+                        rotation: Number(event.currentTarget.value),
+                      })
+                    }
+                  />
+                  <span className="part-popup-color-value">
+                    {Math.round(selectedFreeArtworkItem.rotation)} deg
+                  </span>
+                </div>
+              </label>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+
       {showServiceList ? (
         <div className="part-popup-services" aria-label="Services">
           {target.services.map((serviceId) => {
@@ -1334,6 +1521,45 @@ export function PartServicePopup({
             disabled={!artworkConfig?.imageSource}
             onClick={onApply}
           >
+            Apply
+          </button>
+        </div>
+      ) : showFreeArtEditor ? (
+        <div className="part-popup-actions part-popup-actions--wrap">
+          <button type="button" className="part-popup-link" onClick={onBack}>
+            Back
+          </button>
+          <button type="button" className="part-popup-link" onClick={onCancel}>
+            Cancel
+          </button>
+          {selectedFreeArtworkItem ? (
+            <button
+              type="button"
+              className="part-popup-link"
+              onClick={() => onDuplicateFreeArtwork(selectedFreeArtworkItem.id)}
+            >
+              Duplicate
+            </button>
+          ) : null}
+          {selectedFreeArtworkItem ? (
+            <button
+              type="button"
+              className="part-popup-link"
+              onClick={() => onDeleteFreeArtwork(selectedFreeArtworkItem.id)}
+            >
+              Delete
+            </button>
+          ) : null}
+          {freeArtworkConfig && freeArtworkConfig.items.length > 0 ? (
+            <button
+              type="button"
+              className="part-popup-link"
+              onClick={onDeleteAllFreeArtwork}
+            >
+              Delete All
+            </button>
+          ) : null}
+          <button type="button" className="part-popup-apply" onClick={onApply}>
             Apply
           </button>
         </div>

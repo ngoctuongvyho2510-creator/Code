@@ -325,6 +325,10 @@
   opacity: 0.48;
 }
 
+.part-popup-add {
+  width: fit-content;
+}
+
 .part-popup-actions--wrap {
   flex-wrap: wrap;
   justify-content: flex-start;

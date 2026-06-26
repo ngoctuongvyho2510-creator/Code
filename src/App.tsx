@@ -27,6 +27,8 @@ import type {
   ArtworkPreviewState,
   CaliperPaintPreviewState,
   ChromeDeletePreviewState,
+  FreeArtworkItem,
+  FreeArtworkPreviewState,
   LightTintPreviewState,
   PowderCoatPreviewState,
   TintPreviewState,
@@ -237,6 +239,23 @@ function App() {
     }
   }, [configuratorState.draftSelection])
 
+  const freeArtworkPreview = useMemo<FreeArtworkPreviewState | null>(() => {
+    const draftSelection = configuratorState.draftSelection
+    const freeArtworkConfig = draftSelection?.freeArtworkConfig
+
+    if (
+      draftSelection?.serviceId !== 'free-art' ||
+      !freeArtworkConfig
+    ) {
+      return null
+    }
+
+    return {
+      items: freeArtworkConfig.items,
+      selectedItemId: freeArtworkConfig.selectedItemId,
+    }
+  }, [configuratorState.draftSelection])
+
   const hasFullBodyWrapOverrides = FULL_BODY_PART_IDS.some((partId) =>
     Boolean(configuratorState.appliedDesign.parts[partId]?.wrap),
   )
@@ -342,6 +361,14 @@ function App() {
     configuratorState.draftSelection?.artworkConfig?.selectedArtworkId ??
     activeTargetArtwork.at(-1)?.id ??
     null
+  const activeFreeArtworkConfig =
+    configuratorState.draftSelection?.serviceId === 'free-art'
+      ? configuratorState.draftSelection.freeArtworkConfig
+      : null
+  const activeFreeArtworkItem =
+    activeFreeArtworkConfig?.items.find(
+      (item) => item.id === activeFreeArtworkConfig.selectedItemId,
+    ) ?? null
 
   function handleShellPointerDown(event: PointerEvent<HTMLElement>) {
     if (!configuratorState.draftSelection) {
@@ -405,6 +432,7 @@ function App() {
             artworkPreview={artworkPreview}
             caliperPaintPreview={caliperPaintPreview}
             chromeDeletePreview={chromeDeletePreview}
+            freeArtworkPreview={freeArtworkPreview}
             lightTintPreview={lightTintPreview}
             powderCoatPreview={powderCoatPreview}
             ref={vehicleViewerRef}
@@ -413,6 +441,13 @@ function App() {
             wrapPreview={wrapPreview}
             onArtworkPreviewTransformChange={(patch) =>
               dispatch({ type: 'update-artwork-draft', patch })
+            }
+            onFreeArtworkTransformChange={(artworkId, patch) =>
+              dispatch({
+                type: 'update-free-artwork-item',
+                artworkId,
+                patch,
+              })
             }
             onPartSelect={(partId) =>
               dispatch({ type: 'select-target', targetId: partId })
@@ -458,6 +493,8 @@ function App() {
               artworkConfig={
                 configuratorState.draftSelection?.artworkConfig ?? null
               }
+              freeArtworkConfig={activeFreeArtworkConfig}
+              selectedFreeArtworkItem={activeFreeArtworkItem}
               lightTintConfig={
                 configuratorState.draftSelection?.lightTintConfig ?? null
               }
@@ -551,6 +588,19 @@ function App() {
                   targetId: activeTarget.id,
                 })
               }
+              onAddFreeArtwork={() => dispatch({ type: 'add-free-artwork' })}
+              onDeleteAllFreeArtwork={() =>
+                dispatch({ type: 'delete-all-free-artwork' })
+              }
+              onDeleteFreeArtwork={(artworkId) =>
+                dispatch({ type: 'delete-free-artwork', artworkId })
+              }
+              onDuplicateFreeArtwork={(artworkId) =>
+                dispatch({ type: 'duplicate-free-artwork', artworkId })
+              }
+              onSelectFreeArtwork={(artworkId) =>
+                dispatch({ type: 'select-free-artwork', artworkId })
+              }
               onSelectService={(serviceId) =>
                 dispatch({ type: 'select-service', serviceId })
               }
@@ -589,6 +639,19 @@ function App() {
               }
               onUpdateArtworkDraft={(patch) =>
                 dispatch({ type: 'update-artwork-draft', patch })
+              }
+              onUpdateFreeArtworkItem={(
+                artworkId: string,
+                patch: Partial<FreeArtworkItem>,
+              ) =>
+                dispatch({
+                  type: 'update-free-artwork-item',
+                  artworkId,
+                  patch,
+                })
+              }
+              onUpdateFreeArtworkUpload={(patch) =>
+                dispatch({ type: 'update-free-artwork-upload', patch })
               }
             />
           ) : null}

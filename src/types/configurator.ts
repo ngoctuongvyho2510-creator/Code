@@ -1,6 +1,7 @@
 export type ServiceId =
   | 'wrap'
   | 'artwork'
+  | 'free-art'
   | 'ppf'
   | 'ceramic'
   | 'chrome-delete'
@@ -134,6 +135,7 @@ export type PowderCoatConfig = {
 export type ArtworkMode = 'place' | 'fill'
 
 export type ArtworkVector3 = readonly [number, number, number]
+export type ArtworkVector4 = readonly [number, number, number, number]
 
 export type ArtworkPlacement = {
   id: string
@@ -174,6 +176,34 @@ export type ArtworkDraftState = {
   offsetY: number
 }
 
+export type FreeArtworkItem = {
+  id: string
+  imageSource: string
+  fileName: string
+  imageWidth: number
+  imageHeight: number
+  aspectRatio: number
+  projectorPosition: ArtworkVector3
+  projectorQuaternion: ArtworkVector4
+  uniformScale: number
+  rotation: number
+  visible: boolean
+  locked: boolean
+  layerOrder: number
+}
+
+export type FreeArtworkDraftState = {
+  items: readonly FreeArtworkItem[]
+  selectedItemId: string | null
+  pendingImageSource: string | null
+  pendingFileName: string
+  pendingImageWidth: number
+  pendingImageHeight: number
+  pendingAspectRatio: number
+  lowResolution: boolean
+  error: string | null
+}
+
 export type AppliedServiceState = {
   serviceId: ServiceId
 }
@@ -193,6 +223,7 @@ export type LayeredSurfaceState = {
 
 export type AppliedDesignState = {
   fullBody: LayeredSurfaceState
+  freeArtwork: readonly FreeArtworkItem[]
   parts: Record<string, LayeredSurfaceState>
 }
 
@@ -211,6 +242,7 @@ export type DraftSelectionState = {
   powderCoatConfig: PowderCoatConfig | null
   powderCoatScope: PowderCoatScope | null
   artworkConfig: ArtworkDraftState | null
+  freeArtworkConfig: FreeArtworkDraftState | null
 }
 
 export type WrapPreviewState = {
@@ -246,4 +278,9 @@ export type PowderCoatPreviewState = {
 export type ArtworkPreviewState = {
   targetId: SelectionTargetId
   artwork: ArtworkPlacement
+}
+
+export type FreeArtworkPreviewState = {
+  items: readonly FreeArtworkItem[]
+  selectedItemId: string | null
 }

@@ -3,6 +3,7 @@ import type { ServiceDefinition, ServiceId } from '../types/configurator'
 export const SERVICES = [
   { id: 'wrap', label: 'Wrap' },
   { id: 'artwork', label: 'Artwork' },
+  { id: 'free-art', label: 'Free Art' },
   { id: 'ppf', label: 'PPF' },
   { id: 'ceramic', label: 'Ceramic' },
   { id: 'chrome-delete', label: 'Chrome Delete' },

@@ -18,6 +18,8 @@ import type {
   ArtworkPreviewState,
   CaliperPaintPreviewState,
   ChromeDeletePreviewState,
+  FreeArtworkItem,
+  FreeArtworkPreviewState,
   LightTintPreviewState,
   PowderCoatPreviewState,
   TintPreviewState,
@@ -38,12 +40,17 @@ type VehicleViewerProps = {
   artworkPreview: ArtworkPreviewState | null
   caliperPaintPreview: CaliperPaintPreviewState | null
   chromeDeletePreview: ChromeDeletePreviewState | null
+  freeArtworkPreview: FreeArtworkPreviewState | null
   lightTintPreview: LightTintPreviewState | null
   powderCoatPreview: PowderCoatPreviewState | null
   selectedTargetId: string | null
   tintPreview: TintPreviewState | null
   wrapPreview: WrapPreviewState | null
   onArtworkPreviewTransformChange: (patch: Partial<ArtworkDraftState>) => void
+  onFreeArtworkTransformChange: (
+    artworkId: string,
+    patch: Partial<FreeArtworkItem>,
+  ) => void
   onPartSelect: (partId: string) => void
   onScenePointerMissed: () => void
 }
@@ -142,6 +149,7 @@ type ViewerSceneProps = {
   artworkPreview: ArtworkPreviewState | null
   caliperPaintPreview: CaliperPaintPreviewState | null
   chromeDeletePreview: ChromeDeletePreviewState | null
+  freeArtworkPreview: FreeArtworkPreviewState | null
   lightTintPreview: LightTintPreviewState | null
   powderCoatPreview: PowderCoatPreviewState | null
   onResetReady: (resetView: () => void) => void
@@ -151,6 +159,10 @@ type ViewerSceneProps = {
   tintPreview: TintPreviewState | null
   wrapPreview: WrapPreviewState | null
   onArtworkPreviewTransformChange: (patch: Partial<ArtworkDraftState>) => void
+  onFreeArtworkTransformChange: (
+    artworkId: string,
+    patch: Partial<FreeArtworkItem>,
+  ) => void
 }
 
 function ViewerScene({
@@ -158,6 +170,7 @@ function ViewerScene({
   artworkPreview,
   caliperPaintPreview,
   chromeDeletePreview,
+  freeArtworkPreview,
   lightTintPreview,
   powderCoatPreview,
   onPartSelect,
@@ -167,6 +180,7 @@ function ViewerScene({
   tintPreview,
   wrapPreview,
   onArtworkPreviewTransformChange,
+  onFreeArtworkTransformChange,
 }: ViewerSceneProps) {
   const controlsRef = useRef<OrbitControlsImpl | null>(null)
 
@@ -205,12 +219,14 @@ function ViewerScene({
             caliperPaintPreview={caliperPaintPreview}
             chromeDeletePreview={chromeDeletePreview}
             controlsRef={controlsRef}
+            freeArtworkPreview={freeArtworkPreview}
             lightTintPreview={lightTintPreview}
             powderCoatPreview={powderCoatPreview}
             selectedTargetId={selectedTargetId}
             tintPreview={tintPreview}
             wrapPreview={wrapPreview}
             onArtworkPreviewTransformChange={onArtworkPreviewTransformChange}
+            onFreeArtworkTransformChange={onFreeArtworkTransformChange}
             onPartSelect={onPartSelect}
             onSelectionClear={onScenePointerMissed}
           />
@@ -227,6 +243,7 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
       artworkPreview,
       caliperPaintPreview,
       chromeDeletePreview,
+      freeArtworkPreview,
       lightTintPreview,
       powderCoatPreview,
       onPartSelect,
@@ -235,6 +252,7 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
       tintPreview,
       wrapPreview,
       onArtworkPreviewTransformChange,
+      onFreeArtworkTransformChange,
     },
     ref,
   ) {
@@ -279,12 +297,14 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
             artworkPreview={artworkPreview}
             caliperPaintPreview={caliperPaintPreview}
             chromeDeletePreview={chromeDeletePreview}
+            freeArtworkPreview={freeArtworkPreview}
             lightTintPreview={lightTintPreview}
             powderCoatPreview={powderCoatPreview}
             selectedTargetId={selectedTargetId}
             tintPreview={tintPreview}
             wrapPreview={wrapPreview}
             onArtworkPreviewTransformChange={onArtworkPreviewTransformChange}
+            onFreeArtworkTransformChange={onFreeArtworkTransformChange}
             onPartSelect={onPartSelect}
             onScenePointerMissed={onScenePointerMissed}
             onResetReady={handleResetReady}

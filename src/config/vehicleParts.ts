@@ -31,6 +31,7 @@ const PAINTED_BODY_SERVICES = [
 
 const FULL_BODY_SERVICES = [
   'wrap',
+  'free-art',
   'ppf',
   'ceramic',
 ] as const satisfies readonly ServiceId[]
