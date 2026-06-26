@@ -14,6 +14,7 @@ import { S4Model } from './S4Model'
 import { ViewerErrorBoundary } from './ViewerErrorBoundary'
 import type {
   AppliedDesignState,
+  CaliperPaintPreviewState,
   ChromeDeletePreviewState,
   TintPreviewState,
   WrapPreviewState,
@@ -30,6 +31,7 @@ export type VehicleViewerHandle = {
 
 type VehicleViewerProps = {
   appliedDesign: AppliedDesignState
+  caliperPaintPreview: CaliperPaintPreviewState | null
   chromeDeletePreview: ChromeDeletePreviewState | null
   selectedTargetId: string | null
   tintPreview: TintPreviewState | null
@@ -129,6 +131,7 @@ function InitialViewState({ controlsRef, onResetReady }: InitialViewStateProps) 
 
 type ViewerSceneProps = {
   appliedDesign: AppliedDesignState
+  caliperPaintPreview: CaliperPaintPreviewState | null
   chromeDeletePreview: ChromeDeletePreviewState | null
   onResetReady: (resetView: () => void) => void
   onPartSelect: (partId: string) => void
@@ -140,6 +143,7 @@ type ViewerSceneProps = {
 
 function ViewerScene({
   appliedDesign,
+  caliperPaintPreview,
   chromeDeletePreview,
   onPartSelect,
   onResetReady,
@@ -181,6 +185,7 @@ function ViewerScene({
           <InitialViewState controlsRef={controlsRef} onResetReady={onResetReady} />
           <S4Model
             appliedDesign={appliedDesign}
+            caliperPaintPreview={caliperPaintPreview}
             chromeDeletePreview={chromeDeletePreview}
             controlsRef={controlsRef}
             selectedTargetId={selectedTargetId}
@@ -199,6 +204,7 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
   function VehicleViewer(
     {
       appliedDesign,
+      caliperPaintPreview,
       chromeDeletePreview,
       onPartSelect,
       onScenePointerMissed,
@@ -246,6 +252,7 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
         >
           <ViewerScene
             appliedDesign={appliedDesign}
+            caliperPaintPreview={caliperPaintPreview}
             chromeDeletePreview={chromeDeletePreview}
             selectedTargetId={selectedTargetId}
             tintPreview={tintPreview}

@@ -2,9 +2,11 @@ import { useMemo, useReducer, useRef, type PointerEvent } from 'react'
 import {
   FULL_BODY_PART_IDS,
   FULL_BODY_TARGET_ID,
+  getCaliperPaintScopeOptions,
   getChromeDeleteScopeOptions,
   getTintScopeOptions,
   getSelectionTarget,
+  resolveCaliperPaintScopeTargetIds,
   resolveChromeDeleteScopeTargetIds,
   resolveTintScopeTargetIds,
 } from './config/vehicleParts'
@@ -17,8 +19,12 @@ import {
   configuratorReducer,
   initialConfiguratorState,
 } from './state/configuratorReducer'
-import type { TintPreviewState, WrapPreviewState } from './types/configurator'
-import type { ChromeDeletePreviewState } from './types/configurator'
+import type {
+  CaliperPaintPreviewState,
+  ChromeDeletePreviewState,
+  TintPreviewState,
+  WrapPreviewState,
+} from './types/configurator'
 import './App.css'
 
 const viewerControls = [
@@ -113,6 +119,32 @@ function App() {
     }
   }, [configuratorState.draftSelection])
 
+  const caliperPaintPreview = useMemo<CaliperPaintPreviewState | null>(() => {
+    const draftSelection = configuratorState.draftSelection
+
+    if (
+      draftSelection?.serviceId !== 'caliper-paint' ||
+      !draftSelection.caliperPaintConfig ||
+      !draftSelection.caliperPaintScope
+    ) {
+      return null
+    }
+
+    const targetIds = resolveCaliperPaintScopeTargetIds(
+      draftSelection.targetId,
+      draftSelection.caliperPaintScope,
+    )
+
+    if (targetIds.length === 0) {
+      return null
+    }
+
+    return {
+      targetIds,
+      caliperPaint: draftSelection.caliperPaintConfig,
+    }
+  }, [configuratorState.draftSelection])
+
   const hasFullBodyWrapOverrides = FULL_BODY_PART_IDS.some((partId) =>
     Boolean(configuratorState.appliedDesign.parts[partId]?.wrap),
   )
@@ -141,6 +173,13 @@ function App() {
   const chromeDeleteScopeOptions = activeTarget
     ? getChromeDeleteScopeOptions(activeTarget.id)
     : []
+  const activeCaliperPaintScope =
+    configuratorState.draftSelection?.serviceId === 'caliper-paint'
+      ? configuratorState.draftSelection.caliperPaintScope
+      : null
+  const caliperPaintScopeOptions = activeTarget
+    ? getCaliperPaintScopeOptions(activeTarget.id)
+    : []
   const canResetTint =
     activeTarget && activeTintScope
       ? resolveTintScopeTargetIds(activeTarget.id, activeTintScope).some(
@@ -156,6 +195,17 @@ function App() {
         ).some((targetId) =>
           Boolean(
             configuratorState.appliedDesign.parts[targetId]?.chromeDelete,
+          ),
+        )
+      : false
+  const canResetCaliperPaint =
+    activeTarget && activeCaliperPaintScope
+      ? resolveCaliperPaintScopeTargetIds(
+          activeTarget.id,
+          activeCaliperPaintScope,
+        ).some((targetId) =>
+          Boolean(
+            configuratorState.appliedDesign.parts[targetId]?.caliperPaint,
           ),
         )
       : false
@@ -219,6 +269,7 @@ function App() {
           </h2>
           <VehicleViewer
             appliedDesign={configuratorState.appliedDesign}
+            caliperPaintPreview={caliperPaintPreview}
             chromeDeletePreview={chromeDeletePreview}
             ref={vehicleViewerRef}
             selectedTargetId={configuratorState.draftSelection?.targetId ?? null}
@@ -251,6 +302,13 @@ function App() {
                 configuratorState.draftSelection?.chromeDeleteScope ?? null
               }
               chromeDeleteScopeOptions={chromeDeleteScopeOptions}
+              caliperPaintConfig={
+                configuratorState.draftSelection?.caliperPaintConfig ?? null
+              }
+              caliperPaintScope={
+                configuratorState.draftSelection?.caliperPaintScope ?? null
+              }
+              caliperPaintScopeOptions={caliperPaintScopeOptions}
               wrapConfig={configuratorState.draftSelection?.wrapConfig ?? null}
               tintConfig={configuratorState.draftSelection?.tintConfig ?? null}
               tintScope={configuratorState.draftSelection?.tintScope ?? null}
@@ -260,6 +318,7 @@ function App() {
                 hasFullBodyWrapOverrides
               }
               canResetAllWraps={canResetAllWraps}
+              canResetCaliperPaint={canResetCaliperPaint}
               canResetChromeDelete={canResetChromeDelete}
               canResetTint={canResetTint}
               canResetWrap={activeTargetHasDirectWrap}
@@ -269,6 +328,15 @@ function App() {
               onCancel={() => dispatch({ type: 'cancel-draft' })}
               onClose={() => dispatch({ type: 'cancel-draft' })}
               onResetAllWraps={() => dispatch({ type: 'reset-all-wraps' })}
+              onResetCaliperPaint={() =>
+                activeCaliperPaintScope
+                  ? dispatch({
+                      type: 'reset-caliper-paint',
+                      targetId: activeTarget.id,
+                      scope: activeCaliperPaintScope,
+                    })
+                  : undefined
+              }
               onResetChromeDelete={() =>
                 activeChromeDeleteScope
                   ? dispatch({
@@ -307,6 +375,12 @@ function App() {
               }
               onUpdateChromeDeleteScope={(scope) =>
                 dispatch({ type: 'update-chrome-delete-scope', scope })
+              }
+              onUpdateCaliperPaintDraft={(patch) =>
+                dispatch({ type: 'update-caliper-paint-draft', patch })
+              }
+              onUpdateCaliperPaintScope={(scope) =>
+                dispatch({ type: 'update-caliper-paint-scope', scope })
               }
             />
           ) : null}
