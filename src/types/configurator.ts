@@ -145,6 +145,17 @@ export type PpfConfig = {
   finish: PpfFinish
 }
 
+export type CeramicScope = 'this' | 'both' | 'this-side' | 'all'
+
+export type CeramicScopeOption = {
+  id: CeramicScope
+  label: string
+}
+
+export type CeramicConfig = {
+  enabled: boolean
+}
+
 export type ArtworkMode = 'place' | 'fill'
 
 export type ArtworkVector3 = readonly [number, number, number]
@@ -230,7 +241,7 @@ export type LayeredSurfaceState = {
   powderCoat: PowderCoatConfig | null
   artwork: readonly ArtworkPlacement[]
   ppf: PpfConfig | null
-  ceramic: AppliedServiceState | null
+  ceramic: CeramicConfig | null
   services: Partial<Record<ServiceId, AppliedServiceState>>
 }
 
@@ -256,6 +267,8 @@ export type DraftSelectionState = {
   powderCoatScope: PowderCoatScope | null
   ppfConfig: PpfConfig | null
   ppfScope: PpfScope | null
+  ceramicConfig: CeramicConfig | null
+  ceramicScope: CeramicScope | null
   artworkConfig: ArtworkDraftState | null
   freeArtworkConfig: FreeArtworkDraftState | null
 }
@@ -294,6 +307,12 @@ export type PpfPreviewState = {
   fullBodyBase: boolean
   targetIds: readonly SelectionTargetId[]
   ppf: PpfConfig
+}
+
+export type CeramicPreviewState = {
+  fullBodyBase: boolean
+  targetIds: readonly SelectionTargetId[]
+  ceramic: CeramicConfig
 }
 
 export type ArtworkPreviewState = {

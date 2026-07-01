@@ -2,6 +2,7 @@ import {
   FULL_BODY_PART_IDS,
   FULL_BODY_TARGET_ID,
   getDefaultCaliperPaintScope,
+  getDefaultCeramicScope,
   getDefaultChromeDeleteScope,
   getDefaultLightTintScope,
   getDefaultPpfScope,
@@ -9,8 +10,10 @@ import {
   getDefaultTintScope,
   getSelectionTarget,
   isArtworkTarget,
+  isCeramicTarget,
   isPpfTarget,
   resolveCaliperPaintScopeTargetIds,
+  resolveCeramicScopeTargetIds,
   resolveChromeDeleteScopeTargetIds,
   resolveLightTintScopeTargetIds,
   resolvePpfScopeTargetIds,
@@ -27,6 +30,8 @@ import type {
   CaliperPaintConfig,
   CaliperPaintFinish,
   CaliperPaintScope,
+  CeramicConfig,
+  CeramicScope,
   ChromeDeleteConfig,
   ChromeDeleteFinish,
   ChromeDeleteScope,
@@ -80,6 +85,10 @@ const DEFAULT_POWDER_COAT_CONFIG: PowderCoatConfig = {
 
 const DEFAULT_PPF_CONFIG: PpfConfig = {
   finish: 'gloss',
+}
+
+const DEFAULT_CERAMIC_CONFIG: CeramicConfig = {
+  enabled: true,
 }
 
 const DEFAULT_ARTWORK_PLACE_SIZE = 0.68
@@ -158,6 +167,14 @@ export type ConfiguratorAction =
       scope: PpfScope
     }
   | {
+      type: 'update-ceramic-draft'
+      patch: Partial<CeramicConfig>
+    }
+  | {
+      type: 'update-ceramic-scope'
+      scope: CeramicScope
+    }
+  | {
       type: 'update-artwork-draft'
       patch: Partial<ArtworkDraftState>
     }
@@ -204,6 +221,9 @@ export type ConfiguratorAction =
       type: 'apply-ppf-all'
     }
   | {
+      type: 'apply-ceramic-all'
+    }
+  | {
       type: 'reset-wrap'
       targetId: SelectionTargetId
     }
@@ -237,6 +257,10 @@ export type ConfiguratorAction =
       targetId: SelectionTargetId
     }
   | {
+      type: 'reset-ceramic'
+      targetId: SelectionTargetId
+    }
+  | {
       type: 'remove-artwork'
       targetId: SelectionTargetId
       artworkId: string
@@ -250,6 +274,9 @@ export type ConfiguratorAction =
     }
   | {
       type: 'reset-all-ppf'
+    }
+  | {
+      type: 'reset-all-ceramic'
     }
 
 function createLayeredSurfaceState(): LayeredSurfaceState {
@@ -318,7 +345,7 @@ function applyServiceToSurface(
   if (serviceId === 'ceramic') {
     return {
       ...surfaceState,
-      ceramic: appliedService,
+      ceramic: DEFAULT_CERAMIC_CONFIG,
     }
   }
 
@@ -461,6 +488,25 @@ function clearPpfFromSurface(
   return {
     ...surfaceState,
     ppf: null,
+  }
+}
+
+function setCeramicOnSurface(
+  surfaceState: LayeredSurfaceState,
+  ceramicConfig: CeramicConfig,
+): LayeredSurfaceState {
+  return {
+    ...surfaceState,
+    ceramic: ceramicConfig,
+  }
+}
+
+function clearCeramicFromSurface(
+  surfaceState: LayeredSurfaceState,
+): LayeredSurfaceState {
+  return {
+    ...surfaceState,
+    ceramic: null,
   }
 }
 
@@ -637,6 +683,39 @@ function createPpfDraft(
   return getAppliedPpfForTarget(appliedDesign, targetId) ?? DEFAULT_PPF_CONFIG
 }
 
+function getAppliedCeramicForTarget(
+  appliedDesign: AppliedDesignState,
+  targetId: SelectionTargetId,
+): CeramicConfig | null {
+  if (targetId === FULL_BODY_TARGET_ID) {
+    return appliedDesign.fullBody.ceramic
+  }
+
+  const target = getSelectionTarget(targetId)
+  const partCeramic = appliedDesign.parts[targetId]?.ceramic
+
+  if (partCeramic) {
+    return partCeramic
+  }
+
+  if (target?.fullBody) {
+    return appliedDesign.fullBody.ceramic
+  }
+
+  return null
+}
+
+function createCeramicDraft(
+  appliedDesign: AppliedDesignState,
+  targetId: SelectionTargetId,
+): CeramicConfig | null {
+  if (!isCeramicTarget(targetId)) {
+    return null
+  }
+
+  return getAppliedCeramicForTarget(appliedDesign, targetId) ?? DEFAULT_CERAMIC_CONFIG
+}
+
 function createArtworkId(): string {
   artworkIdCounter += 1
   return `artwork-${Date.now()}-${artworkIdCounter}`
@@ -761,6 +840,18 @@ function updatePpfDraft(
 
   return {
     finish: isPpfFinish(finish) ? finish : currentPpf.finish,
+  }
+}
+
+function updateCeramicDraft(
+  currentCeramic: CeramicConfig,
+  patch: Partial<CeramicConfig>,
+): CeramicConfig {
+  return {
+    enabled:
+      typeof patch.enabled === 'boolean'
+        ? patch.enabled
+        : currentCeramic.enabled,
   }
 }
 
@@ -1425,6 +1516,50 @@ function clearFullBodyPartPpf(
   return clearPpfForTargetIds(parts, FULL_BODY_PART_IDS)
 }
 
+function setCeramicForTargetIds(
+  parts: AppliedDesignState['parts'],
+  targetIds: readonly SelectionTargetId[],
+  ceramicConfig: CeramicConfig,
+): AppliedDesignState['parts'] {
+  const nextParts: AppliedDesignState['parts'] = {
+    ...parts,
+  }
+
+  for (const targetId of targetIds) {
+    const currentPartState = nextParts[targetId] ?? createLayeredSurfaceState()
+
+    nextParts[targetId] = setCeramicOnSurface(
+      currentPartState,
+      ceramicConfig,
+    )
+  }
+
+  return nextParts
+}
+
+function clearCeramicForTargetIds(
+  parts: AppliedDesignState['parts'],
+  targetIds: readonly SelectionTargetId[],
+): AppliedDesignState['parts'] {
+  const nextParts: AppliedDesignState['parts'] = {
+    ...parts,
+  }
+
+  for (const targetId of targetIds) {
+    const currentPartState = nextParts[targetId] ?? createLayeredSurfaceState()
+
+    nextParts[targetId] = clearCeramicFromSurface(currentPartState)
+  }
+
+  return nextParts
+}
+
+function clearFullBodyPartCeramic(
+  parts: AppliedDesignState['parts'],
+): AppliedDesignState['parts'] {
+  return clearCeramicForTargetIds(parts, FULL_BODY_PART_IDS)
+}
+
 export const initialConfiguratorState: ConfiguratorState = {
   appliedDesign: {
     fullBody: createLayeredSurfaceState(),
@@ -1463,6 +1598,8 @@ export function configuratorReducer(
         powderCoatScope: null,
         ppfConfig: null,
         ppfScope: null,
+        ceramicConfig: null,
+        ceramicScope: null,
         artworkConfig: null,
         freeArtworkConfig: null,
       },
@@ -1540,6 +1677,20 @@ export function configuratorReducer(
       (state.draftSelection.targetId === FULL_BODY_TARGET_ID || defaultPpfScope)
         ? createPpfDraft(state.appliedDesign, state.draftSelection.targetId)
         : null
+    const defaultCeramicScope =
+      action.serviceId === 'ceramic' &&
+      state.draftSelection.targetId !== FULL_BODY_TARGET_ID
+        ? getDefaultCeramicScope(state.draftSelection.targetId)
+        : null
+    const ceramicConfig =
+      action.serviceId === 'ceramic' &&
+      (state.draftSelection.targetId === FULL_BODY_TARGET_ID ||
+        defaultCeramicScope)
+        ? createCeramicDraft(
+            state.appliedDesign,
+            state.draftSelection.targetId,
+          )
+        : null
     const artworkConfig =
       action.serviceId === 'artwork'
         ? createArtworkDraft(
@@ -1565,6 +1716,10 @@ export function configuratorReducer(
       return state
     }
 
+    if (action.serviceId === 'ceramic' && !ceramicConfig) {
+      return state
+    }
+
     return {
       ...state,
       draftSelection: {
@@ -1583,6 +1738,8 @@ export function configuratorReducer(
         powderCoatScope: defaultPowderCoatScope,
         ppfConfig,
         ppfScope: defaultPpfScope,
+        ceramicConfig,
+        ceramicScope: defaultCeramicScope,
         artworkConfig,
         freeArtworkConfig,
       },
@@ -1898,6 +2055,58 @@ export function configuratorReducer(
     }
   }
 
+  if (action.type === 'update-ceramic-draft') {
+    const draftSelection = state.draftSelection
+
+    if (draftSelection?.serviceId !== 'ceramic') {
+      return state
+    }
+
+    const currentCeramic =
+      draftSelection.ceramicConfig ??
+      createCeramicDraft(state.appliedDesign, draftSelection.targetId)
+
+    if (!currentCeramic) {
+      return state
+    }
+
+    return {
+      ...state,
+      draftSelection: {
+        ...draftSelection,
+        ceramicConfig: updateCeramicDraft(currentCeramic, action.patch),
+      },
+    }
+  }
+
+  if (action.type === 'update-ceramic-scope') {
+    const draftSelection = state.draftSelection
+
+    if (
+      draftSelection?.serviceId !== 'ceramic' ||
+      draftSelection.targetId === FULL_BODY_TARGET_ID
+    ) {
+      return state
+    }
+
+    if (
+      resolveCeramicScopeTargetIds(
+        draftSelection.targetId,
+        action.scope,
+      ).length === 0
+    ) {
+      return state
+    }
+
+    return {
+      ...state,
+      draftSelection: {
+        ...draftSelection,
+        ceramicScope: action.scope,
+      },
+    }
+  }
+
   if (action.type === 'update-artwork-draft') {
     const draftSelection = state.draftSelection
 
@@ -2098,6 +2307,8 @@ export function configuratorReducer(
         powderCoatScope: null,
         ppfConfig: null,
         ppfScope: null,
+        ceramicConfig: null,
+        ceramicScope: null,
         artworkConfig: null,
         freeArtworkConfig: null,
       },
@@ -2395,6 +2606,55 @@ export function configuratorReducer(
       }
     }
 
+    if (draftSelection.serviceId === 'ceramic') {
+      if (
+        !draftSelection.ceramicConfig ||
+        !isCeramicTarget(draftSelection.targetId)
+      ) {
+        return state
+      }
+
+      if (draftSelection.targetId === FULL_BODY_TARGET_ID) {
+        return {
+          ...state,
+          appliedDesign: {
+            ...state.appliedDesign,
+            fullBody: setCeramicOnSurface(
+              state.appliedDesign.fullBody,
+              draftSelection.ceramicConfig,
+            ),
+          },
+          draftSelection: null,
+        }
+      }
+
+      if (!draftSelection.ceramicScope) {
+        return state
+      }
+
+      const ceramicTargetIds = resolveCeramicScopeTargetIds(
+        draftSelection.targetId,
+        draftSelection.ceramicScope,
+      )
+
+      if (ceramicTargetIds.length === 0) {
+        return state
+      }
+
+      return {
+        ...state,
+        appliedDesign: {
+          ...state.appliedDesign,
+          parts: setCeramicForTargetIds(
+            state.appliedDesign.parts,
+            ceramicTargetIds,
+            draftSelection.ceramicConfig,
+          ),
+        },
+        draftSelection: null,
+      }
+    }
+
     if (draftSelection.targetId === FULL_BODY_TARGET_ID) {
       return {
         ...state,
@@ -2474,6 +2734,30 @@ export function configuratorReducer(
           draftSelection.ppfConfig,
         ),
         parts: clearFullBodyPartPpf(state.appliedDesign.parts),
+      },
+      draftSelection: null,
+    }
+  }
+
+  if (action.type === 'apply-ceramic-all') {
+    const draftSelection = state.draftSelection
+
+    if (
+      draftSelection?.targetId !== FULL_BODY_TARGET_ID ||
+      draftSelection.serviceId !== 'ceramic'
+    ) {
+      return state
+    }
+
+    return {
+      ...state,
+      appliedDesign: {
+        ...state.appliedDesign,
+        fullBody: setCeramicOnSurface(
+          state.appliedDesign.fullBody,
+          DEFAULT_CERAMIC_CONFIG,
+        ),
+        parts: clearFullBodyPartCeramic(state.appliedDesign.parts),
       },
       draftSelection: null,
     }
@@ -2651,6 +2935,38 @@ export function configuratorReducer(
     }
   }
 
+  if (action.type === 'reset-ceramic') {
+    if (!isCeramicTarget(action.targetId)) {
+      return state
+    }
+
+    if (action.targetId === FULL_BODY_TARGET_ID) {
+      return {
+        ...state,
+        appliedDesign: {
+          ...state.appliedDesign,
+          fullBody: clearCeramicFromSurface(state.appliedDesign.fullBody),
+        },
+        draftSelection: null,
+      }
+    }
+
+    const currentPartState =
+      state.appliedDesign.parts[action.targetId] ?? createLayeredSurfaceState()
+
+    return {
+      ...state,
+      appliedDesign: {
+        ...state.appliedDesign,
+        parts: {
+          ...state.appliedDesign.parts,
+          [action.targetId]: clearCeramicFromSurface(currentPartState),
+        },
+      },
+      draftSelection: null,
+    }
+  }
+
   if (action.type === 'remove-artwork') {
     if (!isArtworkTarget(action.targetId)) {
       return state
@@ -2715,6 +3031,18 @@ export function configuratorReducer(
         ...state.appliedDesign,
         fullBody: clearPpfFromSurface(state.appliedDesign.fullBody),
         parts: clearFullBodyPartPpf(state.appliedDesign.parts),
+      },
+      draftSelection: null,
+    }
+  }
+
+  if (action.type === 'reset-all-ceramic') {
+    return {
+      ...state,
+      appliedDesign: {
+        ...state.appliedDesign,
+        fullBody: clearCeramicFromSurface(state.appliedDesign.fullBody),
+        parts: clearFullBodyPartCeramic(state.appliedDesign.parts),
       },
       draftSelection: null,
     }

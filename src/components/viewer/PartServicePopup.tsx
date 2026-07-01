@@ -7,6 +7,9 @@ import type {
   CaliperPaintFinish,
   CaliperPaintScope,
   CaliperPaintScopeOption,
+  CeramicConfig,
+  CeramicScope,
+  CeramicScopeOption,
   ChromeDeleteConfig,
   ChromeDeleteFinish,
   ChromeDeleteScope,
@@ -169,6 +172,9 @@ type PartServicePopupProps = {
   ppfConfig: PpfConfig | null
   ppfScope: PpfScope | null
   ppfScopeOptions: readonly PpfScopeOption[]
+  ceramicConfig: CeramicConfig | null
+  ceramicScope: CeramicScope | null
+  ceramicScopeOptions: readonly CeramicScopeOption[]
   lightTintConfig: LightTintConfig | null
   lightTintScope: LightTintScope | null
   lightTintScopeOptions: readonly LightTintScopeOption[]
@@ -181,13 +187,16 @@ type PartServicePopupProps = {
   tintScopeOptions: readonly TintScopeOption[]
   canApplyAllWraps: boolean
   canApplyAllPpf: boolean
+  canApplyAllCeramic: boolean
   canResetAllWraps: boolean
   canResetAllPpf: boolean
+  canResetAllCeramic: boolean
   canResetCaliperPaint: boolean
   canResetChromeDelete: boolean
   canResetLightTint: boolean
   canResetPowderCoat: boolean
   canResetPpf: boolean
+  canResetCeramic: boolean
   canResetTint: boolean
   canResetWrap: boolean
   canRemoveArtwork: boolean
@@ -199,11 +208,13 @@ type PartServicePopupProps = {
   onClose: () => void
   onResetAllWraps: () => void
   onResetAllPpf: () => void
+  onResetAllCeramic: () => void
   onResetCaliperPaint: () => void
   onResetChromeDelete: () => void
   onResetLightTint: () => void
   onResetPowderCoat: () => void
   onResetPpf: () => void
+  onResetCeramic: () => void
   onResetTint: () => void
   onResetWrap: () => void
   onRemoveArtwork: () => void
@@ -226,6 +237,8 @@ type PartServicePopupProps = {
   onUpdatePowderCoatScope: (scope: PowderCoatScope) => void
   onUpdatePpfDraft: (patch: Partial<PpfConfig>) => void
   onUpdatePpfScope: (scope: PpfScope) => void
+  onUpdateCeramicDraft: (patch: Partial<CeramicConfig>) => void
+  onUpdateCeramicScope: (scope: CeramicScope) => void
   onUpdateLightTintDraft: (patch: Partial<LightTintConfig>) => void
   onUpdateLightTintScope: (scope: LightTintScope) => void
   onUpdateChromeDeleteDraft: (patch: Partial<ChromeDeleteConfig>) => void
@@ -238,16 +251,22 @@ type PartServicePopupProps = {
 export function PartServicePopup({
   artworkConfig,
   freeArtworkConfig,
+  ceramicConfig,
+  ceramicScope,
+  ceramicScopeOptions,
+  canApplyAllCeramic,
   canApplyAllPpf,
   canApplyAllWraps,
   canRemoveAllArtwork,
   canRemoveArtwork,
+  canResetAllCeramic,
   canResetAllPpf,
   canResetAllWraps,
   canResetCaliperPaint,
   canResetChromeDelete,
   canResetLightTint,
   canResetPowderCoat,
+  canResetCeramic,
   canResetPpf,
   canResetTint,
   canResetWrap,
@@ -278,12 +297,14 @@ export function PartServicePopup({
   onBack,
   onCancel,
   onClose,
+  onResetAllCeramic,
   onResetAllPpf,
   onResetAllWraps,
   onResetCaliperPaint,
   onResetChromeDelete,
   onResetLightTint,
   onResetPowderCoat,
+  onResetCeramic,
   onResetPpf,
   onResetTint,
   onResetWrap,
@@ -302,6 +323,8 @@ export function PartServicePopup({
   onUpdateCaliperPaintScope,
   onUpdatePowderCoatDraft,
   onUpdatePowderCoatScope,
+  onUpdateCeramicDraft,
+  onUpdateCeramicScope,
   onUpdatePpfDraft,
   onUpdatePpfScope,
   onUpdateLightTintDraft,
@@ -335,6 +358,10 @@ export function PartServicePopup({
     selectedServiceId === 'ppf' &&
     ppfConfig !== null &&
     (target.id === 'full-body' || ppfScope !== null)
+  const showCeramicEditor =
+    selectedServiceId === 'ceramic' &&
+    ceramicConfig !== null &&
+    (target.id === 'full-body' || ceramicScope !== null)
   const showArtworkEditor =
     selectedServiceId === 'artwork' && artworkConfig !== null
   const showFreeArtEditor =
@@ -347,6 +374,7 @@ export function PartServicePopup({
     !showCaliperPaintEditor &&
     !showPowderCoatEditor &&
     !showPpfEditor &&
+    !showCeramicEditor &&
     !showArtworkEditor &&
     !showFreeArtEditor
   const syncedHexValue = wrapConfig?.color.toUpperCase() ?? '#C49D59'
@@ -1162,6 +1190,53 @@ export function PartServicePopup({
         </div>
       ) : null}
 
+      {showCeramicEditor && ceramicConfig ? (
+        <div className="part-popup-wrap" aria-label="Ceramic options">
+          <div>
+            <p className="part-popup-finish-label">State</p>
+            <div className="part-popup-finish-grid" aria-label="State">
+              <button
+                type="button"
+                className="part-popup-finish"
+                data-selected={ceramicConfig.enabled}
+                onClick={() => onUpdateCeramicDraft({ enabled: true })}
+              >
+                On
+              </button>
+              {target.id !== 'full-body' ? (
+                <button
+                  type="button"
+                  className="part-popup-finish"
+                  data-selected={!ceramicConfig.enabled}
+                  onClick={() => onUpdateCeramicDraft({ enabled: false })}
+                >
+                  Off
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          {ceramicScope && ceramicScopeOptions.length > 0 ? (
+            <div>
+              <p className="part-popup-finish-label">Apply To</p>
+              <div className="part-popup-finish-grid" aria-label="Apply To">
+                {ceramicScopeOptions.map((scope) => (
+                  <button
+                    type="button"
+                    className="part-popup-finish"
+                    data-selected={ceramicScope === scope.id}
+                    key={scope.id}
+                    onClick={() => onUpdateCeramicScope(scope.id)}
+                  >
+                    {scope.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       {showArtworkEditor && artworkConfig ? (
         <div className="part-popup-wrap" aria-label="Artwork options">
           <label className="part-popup-field">
@@ -1657,6 +1732,45 @@ export function PartServicePopup({
             </button>
           ) : null}
           {canApplyAllPpf ? (
+            <button
+              type="button"
+              className="part-popup-apply"
+              onClick={onApplyAll}
+            >
+              Apply All
+            </button>
+          ) : null}
+          <button type="button" className="part-popup-apply" onClick={onApply}>
+            Apply
+          </button>
+        </div>
+      ) : showCeramicEditor ? (
+        <div className="part-popup-actions part-popup-actions--wrap">
+          <button type="button" className="part-popup-link" onClick={onBack}>
+            Back
+          </button>
+          <button type="button" className="part-popup-link" onClick={onCancel}>
+            Cancel
+          </button>
+          {canResetCeramic ? (
+            <button
+              type="button"
+              className="part-popup-link"
+              onClick={onResetCeramic}
+            >
+              Reset
+            </button>
+          ) : null}
+          {canResetAllCeramic ? (
+            <button
+              type="button"
+              className="part-popup-link"
+              onClick={onResetAllCeramic}
+            >
+              Reset All
+            </button>
+          ) : null}
+          {canApplyAllCeramic ? (
             <button
               type="button"
               className="part-popup-apply"

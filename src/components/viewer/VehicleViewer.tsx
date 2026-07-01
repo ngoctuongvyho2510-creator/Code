@@ -18,6 +18,7 @@ import type {
   ArtworkDraftState,
   ArtworkPreviewState,
   CaliperPaintPreviewState,
+  CeramicPreviewState,
   ChromeDeletePreviewState,
   FreeArtworkItem,
   FreeArtworkPreviewState,
@@ -55,6 +56,7 @@ type VehicleViewerProps = {
   artworkPreview: ArtworkPreviewState | null
   caliperPaintPreview: CaliperPaintPreviewState | null
   chromeDeletePreview: ChromeDeletePreviewState | null
+  ceramicPreview: CeramicPreviewState | null
   freeArtworkPreview: FreeArtworkPreviewState | null
   lightTintPreview: LightTintPreviewState | null
   ppfPreview: PpfPreviewState | null
@@ -165,6 +167,7 @@ type ViewerSceneProps = {
   artworkPreview: ArtworkPreviewState | null
   caliperPaintPreview: CaliperPaintPreviewState | null
   chromeDeletePreview: ChromeDeletePreviewState | null
+  ceramicPreview: CeramicPreviewState | null
   freeArtworkPreview: FreeArtworkPreviewState | null
   lightTintPreview: LightTintPreviewState | null
   ppfPreview: PpfPreviewState | null
@@ -187,6 +190,7 @@ function ViewerScene({
   artworkPreview,
   caliperPaintPreview,
   chromeDeletePreview,
+  ceramicPreview,
   freeArtworkPreview,
   lightTintPreview,
   ppfPreview,
@@ -236,6 +240,7 @@ function ViewerScene({
             artworkPreview={artworkPreview}
             caliperPaintPreview={caliperPaintPreview}
             chromeDeletePreview={chromeDeletePreview}
+            ceramicPreview={ceramicPreview}
             controlsRef={controlsRef}
             freeArtworkPreview={freeArtworkPreview}
             lightTintPreview={lightTintPreview}
@@ -262,6 +267,7 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
       artworkPreview,
       caliperPaintPreview,
       chromeDeletePreview,
+      ceramicPreview,
       freeArtworkPreview,
       lightTintPreview,
       ppfPreview,
@@ -319,6 +325,7 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
             artworkPreview={artworkPreview}
             caliperPaintPreview={caliperPaintPreview}
             chromeDeletePreview={chromeDeletePreview}
+            ceramicPreview={ceramicPreview}
             freeArtworkPreview={freeArtworkPreview}
             lightTintPreview={lightTintPreview}
             ppfPreview={ppfPreview}

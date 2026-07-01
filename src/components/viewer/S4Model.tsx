@@ -1,4 +1,11 @@
-import { memo, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from 'react'
 import { useGLTF, useTexture } from '@react-three/drei'
 import { useThree } from '@react-three/fiber'
 import {
@@ -35,6 +42,7 @@ import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import {
   ARTWORK_MESH_NAMES,
   CALIPER_PAINT_MESH_NAMES,
+  CERAMIC_MESH_NAMES,
   CHROME_DELETE_MESH_NAMES,
   FULL_BODY_MESH_NAMES,
   FULL_BODY_TARGET_ID,
@@ -57,6 +65,8 @@ import type {
   CaliperPaintConfig,
   CaliperPaintFinish,
   CaliperPaintPreviewState,
+  CeramicConfig,
+  CeramicPreviewState,
   ChromeDeleteConfig,
   ChromeDeleteFinish,
   ChromeDeletePreviewState,
@@ -171,6 +181,7 @@ type S4ModelProps = {
   caliperPaintPreview: CaliperPaintPreviewState | null
   controlsRef: RefObject<OrbitControlsImpl | null>
   chromeDeletePreview: ChromeDeletePreviewState | null
+  ceramicPreview: CeramicPreviewState | null
   freeArtworkPreview: FreeArtworkPreviewState | null
   lightTintPreview: LightTintPreviewState | null
   ppfPreview: PpfPreviewState | null
@@ -197,6 +208,7 @@ const inspectedWrapMeshScenes = new WeakSet<Object3D>()
 const plateMeshNames = new Set<string>(LICENSE_PLATE_MESH_NAMES)
 const artworkMeshNames = new Set<string>(ARTWORK_MESH_NAMES)
 const caliperPaintMeshNames = new Set<string>(CALIPER_PAINT_MESH_NAMES)
+const ceramicMeshNames = new Set<string>(CERAMIC_MESH_NAMES)
 const chromeDeleteMeshNames = new Set<string>(CHROME_DELETE_MESH_NAMES)
 const lightTintMeshNames = new Set<string>(LIGHT_TINT_MESH_NAMES)
 const ppfMeshNames = new Set<string>(PPF_MESH_NAMES)
@@ -400,6 +412,16 @@ const powderCoatFinishSettings = {
   }
 >
 
+type PpfMaterialSettings = {
+  clearcoat: number
+  clearcoatRoughness: number
+  envMapIntensity: number
+  opacity: number
+  reflectivity: number
+  roughness: number
+  specularIntensity: number
+}
+
 const ppfFinishSettings = {
   gloss: {
     clearcoat: 1,
@@ -419,18 +441,53 @@ const ppfFinishSettings = {
     roughness: 0.88,
     specularIntensity: 0.08,
   },
-} as const satisfies Record<
-  PpfFinish,
-  {
-    clearcoat: number
-    clearcoatRoughness: number
-    envMapIntensity: number
-    opacity: number
-    reflectivity: number
-    roughness: number
-    specularIntensity: number
+} as const satisfies Record<PpfFinish, PpfMaterialSettings>
+
+const ceramicBodySettings = {
+  clearcoatBoost: 0.08,
+  clearcoatRoughnessMultiplier: 0.72,
+  colorDepthMix: 0.025,
+  envMapIntensityBoost: 0.06,
+  reflectivityBoost: 0.055,
+  roughnessMultiplier: 0.86,
+} as const
+
+const ceramicDepthColor = new Color('#050505')
+
+function getPpfFinishSettings(
+  finish: PpfFinish,
+  ceramicEnabled: boolean,
+): PpfMaterialSettings {
+  const settings = ppfFinishSettings[finish]
+
+  if (!ceramicEnabled) {
+    return settings
   }
->
+
+  if (finish === 'gloss') {
+    return {
+      ...settings,
+      clearcoat: 1,
+      clearcoatRoughness: 0.025,
+      envMapIntensity: 0.42,
+      opacity: 0.028,
+      reflectivity: 0.5,
+      roughness: 0.035,
+      specularIntensity: 0.28,
+    }
+  }
+
+  return {
+    ...settings,
+    clearcoat: 0.18,
+    clearcoatRoughness: 0.76,
+    envMapIntensity: 0.2,
+    opacity: 0.018,
+    reflectivity: 0.16,
+    roughness: 0.84,
+    specularIntensity: 0.1,
+  }
+}
 
 function isModelMesh(object: Object3D): object is ModelMesh {
   return object instanceof Mesh
@@ -1241,6 +1298,48 @@ function applyWrapToMesh(mesh: ModelMesh, wrap: WrapConfig) {
   }
 }
 
+function applyCeramicToMaterial(material: Material) {
+  if (!(material instanceof MeshStandardMaterial)) {
+    return
+  }
+
+  material.color.lerp(ceramicDepthColor, ceramicBodySettings.colorDepthMix)
+  material.roughness = Math.max(
+    0.08,
+    material.roughness * ceramicBodySettings.roughnessMultiplier,
+  )
+  material.envMapIntensity = Math.min(
+    1.65,
+    material.envMapIntensity + ceramicBodySettings.envMapIntensityBoost,
+  )
+
+  if (material instanceof MeshPhysicalMaterial) {
+    material.clearcoat = Math.min(
+      1,
+      material.clearcoat + ceramicBodySettings.clearcoatBoost,
+    )
+    material.clearcoatRoughness = Math.max(
+      0.035,
+      material.clearcoatRoughness *
+        ceramicBodySettings.clearcoatRoughnessMultiplier,
+    )
+    material.reflectivity = Math.min(
+      0.78,
+      material.reflectivity + ceramicBodySettings.reflectivityBoost,
+    )
+    material.transmission = 0
+    material.thickness = 0
+  }
+
+  material.needsUpdate = true
+}
+
+function applyCeramicToMesh(mesh: ModelMesh) {
+  for (const material of getMaterials(mesh.material)) {
+    applyCeramicToMaterial(material)
+  }
+}
+
 function getEffectiveWrapForMesh(
   meshName: string,
   appliedDesign: AppliedDesignState,
@@ -1276,7 +1375,12 @@ function applyWrapMaterials(
   preparedScene: PreparedModelScene,
   appliedDesign: AppliedDesignState,
   wrapPreview: WrapPreviewState | null,
+  ceramicPreview: CeramicPreviewState | null,
+  ppfPreview: PpfPreviewState | null,
 ) {
+  const ceramicPreviewTargetIds = new Set(ceramicPreview?.targetIds ?? [])
+  const ppfPreviewTargetIds = new Set(ppfPreview?.targetIds ?? [])
+
   preparedScene.scene.traverse((object) => {
     if (!isModelMesh(object) || !wrapCapableMeshNames.has(object.name)) {
       return
@@ -1292,6 +1396,33 @@ function applyWrapMaterials(
 
     if (wrap) {
       applyWrapToMesh(object, wrap)
+    }
+
+    if (!ceramicMeshNames.has(object.name)) {
+      return
+    }
+
+    const part = getSelectablePartByMeshName(object.name)
+
+    if (!part) {
+      return
+    }
+
+    const ceramic = getEffectiveCeramicForTarget(
+      part.id,
+      appliedDesign,
+      ceramicPreview,
+      ceramicPreviewTargetIds,
+    )
+    const ppf = getEffectivePpfForTarget(
+      part.id,
+      appliedDesign,
+      ppfPreview,
+      ppfPreviewTargetIds,
+    )
+
+    if (ceramic?.enabled && !ppf) {
+      applyCeramicToMesh(object)
     }
   })
 }
@@ -2894,11 +3025,41 @@ function getEffectivePpfForTarget(
         ppf: fullBodyPpf,
         preview: false,
       }
-    : null
+      : null
 }
 
-function createPpfMaterial(ppf: PpfConfig): MeshPhysicalMaterial {
-  const settings = ppfFinishSettings[ppf.finish]
+function getEffectiveCeramicForTarget(
+  partId: string,
+  appliedDesign: AppliedDesignState,
+  ceramicPreview: CeramicPreviewState | null,
+  previewTargetIds: Set<string>,
+): CeramicConfig | null {
+  if (
+    ceramicPreview &&
+    !ceramicPreview.fullBodyBase &&
+    previewTargetIds.has(partId)
+  ) {
+    return ceramicPreview.ceramic
+  }
+
+  const partCeramic = appliedDesign.parts[partId]?.ceramic ?? null
+
+  if (partCeramic) {
+    return partCeramic
+  }
+
+  if (ceramicPreview?.fullBodyBase) {
+    return ceramicPreview.ceramic
+  }
+
+  return appliedDesign.fullBody.ceramic
+}
+
+function createPpfMaterial(
+  ppf: PpfConfig,
+  ceramicEnabled: boolean,
+): MeshPhysicalMaterial {
+  const settings = getPpfFinishSettings(ppf.finish, ceramicEnabled)
   const material = new MeshPhysicalMaterial({
     blending: AdditiveBlending,
     color: '#000000',
@@ -2934,63 +3095,94 @@ function createPpfMaterial(ppf: PpfConfig): MeshPhysicalMaterial {
 }
 
 type PpfOverlayProps = {
+  ceramicEnabled: boolean
   finish: PpfFinish
   mesh: ModelMesh
   partId: string
   preview: boolean
 }
 
+function disablePpfRaycast() {
+  return undefined
+}
+
 const PpfOverlay = memo(function PpfOverlay({
+  ceramicEnabled,
   finish,
   mesh,
   partId,
   preview,
 }: PpfOverlayProps) {
-  const overlay = useMemo(() => {
+  const geometry = useMemo(() => mesh.geometry.clone(), [mesh])
+  const matrix = useMemo(() => {
     mesh.updateWorldMatrix(true, false)
 
-    const ppf: PpfConfig = { finish }
-    const overlayMesh = new Mesh(mesh.geometry.clone(), createPpfMaterial(ppf))
-
-    overlayMesh.name = preview
-      ? `MW_PPF_PREVIEW_${partId}_${mesh.name}`
-      : `MW_PPF_${partId}_${mesh.name}`
-    overlayMesh.matrix.copy(mesh.matrixWorld)
-    overlayMesh.matrixAutoUpdate = false
-    overlayMesh.frustumCulled = false
-    overlayMesh.renderOrder = preview ? PPF_PREVIEW_RENDER_ORDER : PPF_RENDER_ORDER
-    overlayMesh.userData.modifyWrapPpf = true
-    overlayMesh.userData.ppfPartId = partId
-    overlayMesh.userData.sourceMeshName = mesh.name
-    overlayMesh.raycast = () => undefined
-
-    return overlayMesh
-  }, [finish, mesh, partId, preview])
+    return mesh.matrixWorld.clone()
+  }, [mesh])
+  const material = useMemo(
+    () => createPpfMaterial({ finish }, ceramicEnabled),
+    [ceramicEnabled, finish],
+  )
+  const name = preview
+    ? `MW_PPF_PREVIEW_${partId}_${mesh.name}`
+    : `MW_PPF_${partId}_${mesh.name}`
+  const renderOrder = preview ? PPF_PREVIEW_RENDER_ORDER : PPF_RENDER_ORDER
+  const userData = useMemo(
+    () => ({
+      modifyWrapPpf: true,
+      ppfPartId: partId,
+      sourceMeshName: mesh.name,
+    }),
+    [mesh.name, partId],
+  )
 
   useEffect(() => {
     return () => {
-      overlay.geometry.dispose()
-      disposeMaterial(overlay.material)
+      geometry.dispose()
     }
-  }, [overlay])
+  }, [geometry])
 
-  return <primitive object={overlay} />
+  useEffect(() => {
+    return () => {
+      disposeMaterial(material)
+    }
+  }, [material])
+
+  return (
+    <mesh
+      frustumCulled={false}
+      geometry={geometry}
+      material={material}
+      matrix={matrix}
+      matrixAutoUpdate={false}
+      name={name}
+      raycast={disablePpfRaycast}
+      renderOrder={renderOrder}
+      userData={userData}
+    />
+  )
 })
 
 type PpfOverlaysProps = {
   appliedDesign: AppliedDesignState
+  ceramicPreview: CeramicPreviewState | null
   ppfPreview: PpfPreviewState | null
   targetEntries: readonly PpfTargetEntry[]
 }
 
 function PpfOverlays({
   appliedDesign,
+  ceramicPreview,
   ppfPreview,
   targetEntries,
 }: PpfOverlaysProps) {
   const previewTargetIds = useMemo(
     () => new Set(ppfPreview?.targetIds ?? []),
     [ppfPreview],
+  )
+  const ceramicPreviewTargetIds = useMemo(
+    () => new Set(ceramicPreview?.targetIds ?? []),
+    [ceramicPreview],
   )
   const items = useMemo(
     () =>
@@ -3002,9 +3194,17 @@ function PpfOverlays({
           previewTargetIds,
         )
 
+        const ceramic = getEffectiveCeramicForTarget(
+          target.partId,
+          appliedDesign,
+          ceramicPreview,
+          ceramicPreviewTargetIds,
+        )
+
         return effectivePpf
           ? [
               {
+                ceramicEnabled: ceramic?.enabled === true,
                 finish: effectivePpf.ppf.finish,
                 mesh: target.mesh,
                 partId: target.partId,
@@ -3013,13 +3213,21 @@ function PpfOverlays({
             ]
           : []
       }),
-    [appliedDesign, ppfPreview, previewTargetIds, targetEntries],
+    [
+      appliedDesign,
+      ceramicPreview,
+      ceramicPreviewTargetIds,
+      ppfPreview,
+      previewTargetIds,
+      targetEntries,
+    ],
   )
 
   return (
     <>
       {items.map((item) => (
         <PpfOverlay
+          ceramicEnabled={item.ceramicEnabled}
           finish={item.finish}
           key={`${item.partId}-${item.mesh.uuid}`}
           mesh={item.mesh}
@@ -3035,6 +3243,7 @@ export function S4Model({
   appliedDesign,
   artworkPreview,
   caliperPaintPreview,
+  ceramicPreview,
   chromeDeletePreview,
   controlsRef,
   freeArtworkPreview,
@@ -3168,8 +3377,14 @@ export function S4Model({
   }, [preparedScene])
 
   useEffect(() => {
-    applyWrapMaterials(preparedScene, appliedDesign, wrapPreview)
-  }, [appliedDesign, preparedScene, wrapPreview])
+    applyWrapMaterials(
+      preparedScene,
+      appliedDesign,
+      wrapPreview,
+      ceramicPreview,
+      ppfPreview,
+    )
+  }, [appliedDesign, ceramicPreview, ppfPreview, preparedScene, wrapPreview])
 
   useEffect(() => {
     applyTintMaterials(preparedScene, appliedDesign, tintPreview)
@@ -3819,6 +4034,7 @@ export function S4Model({
       />
       <PpfOverlays
         appliedDesign={appliedDesign}
+        ceramicPreview={ceramicPreview}
         ppfPreview={ppfPreview}
         targetEntries={ppfTargetEntries}
       />

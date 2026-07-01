@@ -1,6 +1,8 @@
 import type {
   CaliperPaintScope,
   CaliperPaintScopeOption,
+  CeramicScope,
+  CeramicScopeOption,
   ChromeDeleteScope,
   ChromeDeleteScopeOption,
   LightTintScope,
@@ -38,26 +40,20 @@ const FULL_BODY_SERVICES = [
   'ceramic',
 ] as const satisfies readonly ServiceId[]
 
-const CHROME_SERVICES = [
-  'chrome-delete',
-  'ceramic',
-] as const satisfies readonly ServiceId[]
+const CHROME_SERVICES = ['chrome-delete'] as const satisfies readonly ServiceId[]
 
-const TRIM_SERVICES = [
-  'wrap',
-  'ceramic',
-] as const satisfies readonly ServiceId[]
+const TRIM_SERVICES = ['wrap'] as const satisfies readonly ServiceId[]
 
-const GLASS_SERVICES = ['tint', 'ceramic'] as const satisfies readonly ServiceId[]
+const GLASS_SERVICES = ['tint'] as const satisfies readonly ServiceId[]
 const BADGE_SERVICES = ['wrap', 'remove'] as const satisfies readonly ServiceId[]
-const GRILLE_SERVICES = ['wrap', 'ceramic'] as const satisfies readonly ServiceId[]
-const WHEEL_SERVICES = ['powder-coat', 'ceramic'] as const satisfies readonly ServiceId[]
+const GRILLE_SERVICES = ['wrap'] as const satisfies readonly ServiceId[]
+const WHEEL_SERVICES = ['powder-coat'] as const satisfies readonly ServiceId[]
 const CENTER_CAP_SERVICES = ['wrap'] as const satisfies readonly ServiceId[]
 const CALIPER_SERVICES = ['caliper-paint'] as const satisfies readonly ServiceId[]
 const BRAKE_DISC_SERVICES = ['performance'] as const satisfies readonly ServiceId[]
-const LAMP_SERVICES = ['tint', 'ceramic'] as const satisfies readonly ServiceId[]
+const LAMP_SERVICES = ['tint'] as const satisfies readonly ServiceId[]
 const SIGNAL_SERVICES = ['tint'] as const satisfies readonly ServiceId[]
-const EXHAUST_SERVICES = ['ceramic'] as const satisfies readonly ServiceId[]
+const EXHAUST_SERVICES = [] as const satisfies readonly ServiceId[]
 const WIPER_SERVICES = ['wrap'] as const satisfies readonly ServiceId[]
 
 export const TINTABLE_GLASS_PART_IDS = [
@@ -214,6 +210,13 @@ const ppfScopeLabels = {
   'this-side': 'This Side',
   all: 'All',
 } as const satisfies Record<PpfScope, string>
+
+const ceramicScopeLabels = {
+  this: 'This',
+  both: 'Both',
+  'this-side': 'This Side',
+  all: 'All',
+} as const satisfies Record<CeramicScope, string>
 
 const tintScopesByPartId = {
   windshield: ['this', 'all'],
@@ -423,8 +426,8 @@ export const VEHICLE_PARTS = [
   vehiclePart('rear-window-right', 'Window RR', ['MW_GLASS_WINDOW_RR'], 'glass', GLASS_SERVICES, 'glass'),
   vehiclePart('quarter-glass-left', 'Quarter Glass L', ['MW_GLASS_QUARTER_L'], 'glass', GLASS_SERVICES, 'glass'),
   vehiclePart('quarter-glass-right', 'Quarter Glass R', ['MW_GLASS_QUARTER_R'], 'glass', GLASS_SERVICES, 'glass'),
-  vehiclePart('mirror-glass-left', 'Mirror Glass L', ['MW_GLASS_SIDE_MIRROR_L'], 'mirror-glass', ['ceramic'], 'glass'),
-  vehiclePart('mirror-glass-right', 'Mirror Glass R', ['MW_GLASS_SIDE_MIRROR_R'], 'mirror-glass', ['ceramic'], 'glass'),
+  vehiclePart('mirror-glass-left', 'Mirror Glass L', ['MW_GLASS_SIDE_MIRROR_L'], 'mirror-glass', [], 'glass'),
+  vehiclePart('mirror-glass-right', 'Mirror Glass R', ['MW_GLASS_SIDE_MIRROR_R'], 'mirror-glass', [], 'glass'),
 
   vehiclePart('s4-badge-front', 'S4 Front', ['MW_BADGE_S4_FRONT', 'MW_BADGE_S4_FRONT_BACKING'], 'badge', BADGE_SERVICES, 'badge'),
   vehiclePart('s4-badge-rear', 'S4 Rear', ['MW_BADGE_S4_REAR', 'MW_BADGE_S4_REAR_BACKING'], 'badge', BADGE_SERVICES, 'badge'),
@@ -495,6 +498,7 @@ export const FULL_BODY_PART_IDS = VEHICLE_PARTS.filter(
 ).map((part) => part.id)
 
 export const PPF_PART_IDS = FULL_BODY_PART_IDS
+export const CERAMIC_PART_IDS = FULL_BODY_PART_IDS
 
 const LEFT_DOOR_PPF_PART_IDS = [
   'door-front-left',
@@ -575,6 +579,10 @@ export const LIGHT_TINT_MESH_NAMES = LIGHT_TINT_PART_IDS.flatMap(
 )
 
 export const PPF_MESH_NAMES = PPF_PART_IDS.flatMap(
+  (partId) => partById.get(partId)?.meshNames ?? [],
+)
+
+export const CERAMIC_MESH_NAMES = CERAMIC_PART_IDS.flatMap(
   (partId) => partById.get(partId)?.meshNames ?? [],
 )
 
@@ -763,8 +771,28 @@ export function isPpfTarget(targetId: string): boolean {
   return targetId === FULL_BODY_TARGET_ID || PPF_PART_IDS.includes(targetId)
 }
 
+export function isCeramicTarget(targetId: string): boolean {
+  return targetId === FULL_BODY_TARGET_ID || CERAMIC_PART_IDS.includes(targetId)
+}
+
 function getPpfScopesForPartId(targetId: string): readonly PpfScope[] {
   if (!PPF_PART_IDS.includes(targetId)) {
+    return []
+  }
+
+  if ((DOOR_PPF_PART_IDS as readonly string[]).includes(targetId)) {
+    return ['this', 'this-side', 'all']
+  }
+
+  if (ppfPairPartIdsByPartId[targetId]) {
+    return ['this', 'both']
+  }
+
+  return ['this']
+}
+
+function getCeramicScopesForPartId(targetId: string): readonly CeramicScope[] {
+  if (!CERAMIC_PART_IDS.includes(targetId)) {
     return []
   }
 
@@ -783,10 +811,23 @@ export function getDefaultPpfScope(targetId: string): PpfScope | null {
   return getPpfScopeOptions(targetId)[0]?.id ?? null
 }
 
+export function getDefaultCeramicScope(targetId: string): CeramicScope | null {
+  return getCeramicScopeOptions(targetId)[0]?.id ?? null
+}
+
 export function getPpfScopeOptions(targetId: string): readonly PpfScopeOption[] {
   return getPpfScopesForPartId(targetId).map((scope) => ({
     id: scope,
     label: ppfScopeLabels[scope],
+  }))
+}
+
+export function getCeramicScopeOptions(
+  targetId: string,
+): readonly CeramicScopeOption[] {
+  return getCeramicScopesForPartId(targetId).map((scope) => ({
+    id: scope,
+    label: ceramicScopeLabels[scope],
   }))
 }
 
@@ -795,6 +836,33 @@ export function resolvePpfScopeTargetIds(
   scope: PpfScope,
 ): readonly string[] {
   const validScopes = getPpfScopesForPartId(targetId)
+
+  if (!validScopes.includes(scope)) {
+    return []
+  }
+
+  if (scope === 'this') {
+    return [targetId]
+  }
+
+  if (scope === 'all') {
+    return DOOR_PPF_PART_IDS
+  }
+
+  if (scope === 'this-side') {
+    return (LEFT_DOOR_PPF_PART_IDS as readonly string[]).includes(targetId)
+      ? LEFT_DOOR_PPF_PART_IDS
+      : RIGHT_DOOR_PPF_PART_IDS
+  }
+
+  return ppfPairPartIdsByPartId[targetId] ?? []
+}
+
+export function resolveCeramicScopeTargetIds(
+  targetId: string,
+  scope: CeramicScope,
+): readonly string[] {
+  const validScopes = getCeramicScopesForPartId(targetId)
 
   if (!validScopes.includes(scope)) {
     return []
