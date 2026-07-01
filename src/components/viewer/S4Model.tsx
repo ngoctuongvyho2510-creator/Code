@@ -12,6 +12,7 @@ import {
   AdditiveBlending,
   Box3,
   BufferGeometry,
+  CanvasTexture,
   ClampToEdgeWrapping,
   Color,
   EdgesGeometry,
@@ -28,6 +29,7 @@ import {
   PlaneGeometry,
   Quaternion,
   Raycaster,
+  RepeatWrapping,
   SRGBColorSpace,
   Texture,
   Vector2,
@@ -84,9 +86,13 @@ import type {
   TintPreviewState,
   VehiclePartDefinition,
   WrapConfig,
-  WrapFinish,
   WrapPreviewState,
 } from '../../types/configurator'
+import type { RenderPresetId } from '../../types/materialCatalog'
+import {
+  resolveWrapMaterialRenderProfile,
+  type WrapMaterialRenderProfile,
+} from '../../utils/wrapMaterialRenderer'
 
 const MODEL_URL = '/Mahir S4.glb'
 const PLATE_TEXTURE_URL = '/MW Plate.png'
@@ -283,39 +289,6 @@ const cleanBlackExteriorTrimSettings = {
   reflectivity: 0.26,
   roughness: 0.5,
 } as const
-
-const wrapFinishSettings = {
-  gloss: {
-    clearcoat: 0.92,
-    clearcoatRoughness: 0.08,
-    envMapIntensity: 1.35,
-    reflectivity: 0.62,
-    roughness: 0.18,
-  },
-  satin: {
-    clearcoat: 0.48,
-    clearcoatRoughness: 0.28,
-    envMapIntensity: 1.05,
-    reflectivity: 0.48,
-    roughness: 0.45,
-  },
-  matte: {
-    clearcoat: 0.08,
-    clearcoatRoughness: 0.68,
-    envMapIntensity: 0.78,
-    reflectivity: 0.32,
-    roughness: 0.78,
-  },
-} as const satisfies Record<
-  WrapFinish,
-  {
-    clearcoat: number
-    clearcoatRoughness: number
-    envMapIntensity: number
-    reflectivity: number
-    roughness: number
-  }
->
 
 const chromeDeleteFinishSettings = {
   gloss: {
@@ -1363,27 +1336,489 @@ function resetMeshMaterialToFactory(
   copyMaterialState(mesh.material, factoryMaterial)
 }
 
+type WrapProceduralTextureKey =
+  | 'brushed'
+  | 'carbon'
+  | 'diamond'
+  | 'microflake'
+  | 'phosphor'
+  | 'rugged'
+  | 'velvet'
+
+const wrapProceduralTextureCache = new Map<
+  WrapProceduralTextureKey,
+  Texture
+>()
+
+function getWrapProceduralTexture(
+  key: WrapProceduralTextureKey,
+): Texture {
+  const cachedTexture = wrapProceduralTextureCache.get(key)
+
+  if (cachedTexture) {
+    return cachedTexture
+  }
+
+  const texture = createWrapProceduralTexture(key)
+
+  wrapProceduralTextureCache.set(key, texture)
+  return texture
+}
+
+function createWrapProceduralTexture(
+  key: WrapProceduralTextureKey,
+): Texture {
+  const size = 128
+  const canvas = document.createElement('canvas')
+  const context = canvas.getContext('2d')
+
+  canvas.width = size
+  canvas.height = size
+
+  if (!context) {
+    throw new Error('Wrap material texture canvas unavailable')
+  }
+
+  drawWrapProceduralTexture(context, key, size)
+
+  const texture = new CanvasTexture(canvas)
+  const repeat = getWrapTextureRepeat(key)
+
+  texture.wrapS = RepeatWrapping
+  texture.wrapT = RepeatWrapping
+  texture.repeat.set(repeat.x, repeat.y)
+  texture.needsUpdate = true
+
+  return texture
+}
+
+function drawWrapProceduralTexture(
+  context: CanvasRenderingContext2D,
+  key: WrapProceduralTextureKey,
+  size: number,
+) {
+  let seed = key.length * 7919
+  const random = () => {
+    seed = (seed * 1664525 + 1013904223) % 4294967296
+    return seed / 4294967296
+  }
+
+  context.clearRect(0, 0, size, size)
+  context.fillStyle = 'rgb(128,128,128)'
+  context.fillRect(0, 0, size, size)
+
+  if (key === 'carbon') {
+    context.fillStyle = 'rgb(92,92,92)'
+    context.fillRect(0, 0, size, size)
+    context.strokeStyle = 'rgba(190,190,190,0.42)'
+    context.lineWidth = 2
+
+    for (let offset = -size; offset < size * 2; offset += 8) {
+      context.beginPath()
+      context.moveTo(offset, 0)
+      context.lineTo(offset + size, size)
+      context.stroke()
+      context.beginPath()
+      context.moveTo(offset + 4, size)
+      context.lineTo(offset + size + 4, 0)
+      context.stroke()
+    }
+
+    return
+  }
+
+  if (key === 'brushed') {
+    context.fillStyle = 'rgb(122,122,122)'
+    context.fillRect(0, 0, size, size)
+
+    for (let y = 0; y < size; y += 1) {
+      const shade = 102 + Math.round(random() * 48)
+
+      context.fillStyle = `rgb(${shade},${shade},${shade})`
+      context.fillRect(0, y, size, 1)
+    }
+
+    return
+  }
+
+  if (key === 'rugged') {
+    context.fillStyle = 'rgb(148,148,148)'
+    context.fillRect(0, 0, size, size)
+
+    for (let index = 0; index < 900; index += 1) {
+      const shade = 90 + Math.round(random() * 100)
+
+      context.fillStyle = `rgba(${shade},${shade},${shade},0.68)`
+      context.fillRect(
+        Math.floor(random() * size),
+        Math.floor(random() * size),
+        1 + Math.floor(random() * 3),
+        1 + Math.floor(random() * 3),
+      )
+    }
+
+    return
+  }
+
+  if (key === 'velvet') {
+    context.fillStyle = 'rgb(112,112,112)'
+    context.fillRect(0, 0, size, size)
+
+    for (let x = 0; x < size; x += 2) {
+      const shade = 92 + Math.round(random() * 64)
+
+      context.strokeStyle = `rgba(${shade},${shade},${shade},0.55)`
+      context.beginPath()
+      context.moveTo(x, 0)
+      context.lineTo(x + random() * 8 - 4, size)
+      context.stroke()
+    }
+
+    return
+  }
+
+  const sparkleCount =
+    key === 'diamond' ? 420 : key === 'microflake' ? 360 : 180
+
+  for (let index = 0; index < sparkleCount; index += 1) {
+    const shade =
+      key === 'phosphor'
+        ? 142 + Math.round(random() * 68)
+        : 82 + Math.round(random() * 150)
+    const alpha = key === 'diamond' ? 0.82 : 0.46
+
+    context.fillStyle = `rgba(${shade},${shade},${shade},${alpha})`
+    context.fillRect(
+      Math.floor(random() * size),
+      Math.floor(random() * size),
+      key === 'diamond' ? 1 : 2,
+      key === 'diamond' ? 1 : 2,
+    )
+  }
+}
+
+function getWrapTextureRepeat(
+  key: WrapProceduralTextureKey,
+): { x: number; y: number } {
+  if (key === 'brushed') {
+    return { x: 14, y: 34 }
+  }
+
+  if (key === 'carbon') {
+    return { x: 24, y: 24 }
+  }
+
+  if (key === 'rugged') {
+    return { x: 30, y: 30 }
+  }
+
+  if (key === 'velvet') {
+    return { x: 20, y: 20 }
+  }
+
+  return { x: 42, y: 42 }
+}
+
+function applyWrapProceduralTexture(
+  material: MeshStandardMaterial,
+  presetId: RenderPresetId,
+) {
+  if (presetId === 'metallic') {
+    const texture = getWrapProceduralTexture('microflake')
+
+    material.roughnessMap = texture
+    material.bumpMap = texture
+    material.bumpScale = 0.0018
+    return
+  }
+
+  if (presetId === 'diamond_flake') {
+    const texture = getWrapProceduralTexture('diamond')
+
+    material.roughnessMap = texture
+    material.bumpMap = texture
+    material.bumpScale = 0.0024
+    return
+  }
+
+  if (presetId === 'special_effect') {
+    const texture = getWrapProceduralTexture('microflake')
+
+    material.roughnessMap = texture
+    material.bumpMap = texture
+    material.bumpScale = 0.0018
+    return
+  }
+
+  if (presetId === 'carbon_fiber') {
+    const texture = getWrapProceduralTexture('carbon')
+
+    material.roughnessMap = texture
+    material.bumpMap = texture
+    material.bumpScale = 0.0045
+    return
+  }
+
+  if (presetId === 'brushed_metal') {
+    const texture = getWrapProceduralTexture('brushed')
+
+    material.roughnessMap = texture
+    material.bumpMap = texture
+    material.bumpScale = 0.0032
+    return
+  }
+
+  if (
+    presetId === 'rugged_texture' ||
+    presetId === 'patterned_texture' ||
+    presetId === 'textured_generic'
+  ) {
+    const texture = getWrapProceduralTexture('rugged')
+
+    material.roughnessMap = texture
+    material.bumpMap = texture
+    material.bumpScale = 0.011
+    return
+  }
+
+  if (presetId === 'velvet') {
+    const texture = getWrapProceduralTexture('velvet')
+
+    material.roughnessMap = texture
+    material.bumpMap = texture
+    material.bumpScale = 0.005
+    return
+  }
+
+  if (presetId === 'glow_in_dark') {
+    const texture = getWrapProceduralTexture('phosphor')
+
+    material.roughnessMap = texture
+    material.bumpMap = texture
+    material.bumpScale = 0.002
+  }
+}
+
+function getWrapEnvMapIntensity(presetId: RenderPresetId): number {
+  if (presetId === 'solid_high_gloss') {
+    return 1.38
+  }
+
+  if (presetId === 'solid_gloss') {
+    return 1.24
+  }
+
+  if (presetId === 'solid_satin') {
+    return 1.02
+  }
+
+  if (presetId === 'solid_matte' || presetId === 'velvet') {
+    return 0.72
+  }
+
+  if (presetId === 'chrome') {
+    return 1.86
+  }
+
+  if (presetId === 'brushed_metal') {
+    return 1.28
+  }
+
+  if (
+    presetId === 'rugged_texture' ||
+    presetId === 'patterned_texture' ||
+    presetId === 'textured_generic'
+  ) {
+    return 0.86
+  }
+
+  return 1.22
+}
+
+function getWrapReflectivity(presetId: RenderPresetId): number {
+  if (presetId === 'solid_matte' || presetId === 'velvet') {
+    return 0.22
+  }
+
+  if (presetId === 'solid_satin' || presetId === 'rugged_texture') {
+    return 0.42
+  }
+
+  if (presetId === 'chrome') {
+    return 1
+  }
+
+  return 0.58
+}
+
+function getColorFromHex(hexColor: string): Color {
+  return new Color().setStyle(hexColor, SRGBColorSpace)
+}
+
+function getWrapDisplayColor(profile: WrapMaterialRenderProfile): Color {
+  const color = getColorFromHex(profile.colorHex)
+  const secondaryColor = profile.secondaryColorHex
+    ? getColorFromHex(profile.secondaryColorHex)
+    : null
+  const tertiaryColor = profile.tertiaryColorHex
+    ? getColorFromHex(profile.tertiaryColorHex)
+    : null
+
+  if (profile.renderPresetId === 'photochromic' && secondaryColor) {
+    const sunlight = Math.min(1, Math.max(0, profile.previewIntensity))
+
+    color.lerp(secondaryColor, sunlight * 0.72)
+
+    if (tertiaryColor && sunlight > 0.45) {
+      color.lerp(tertiaryColor, (sunlight - 0.45) * 0.5)
+    }
+  }
+
+  if (profile.renderPresetId === 'fluorescent' && secondaryColor) {
+    color.lerp(secondaryColor, profile.previewMode === 'uv' ? 0.32 : 0.12)
+  }
+
+  if (profile.renderPresetId === 'pearl' && secondaryColor) {
+    color.lerp(secondaryColor, 0.08)
+  }
+
+  if (profile.renderPresetId === 'color_shift' && secondaryColor) {
+    color.lerp(secondaryColor, 0.06)
+  }
+
+  if (
+    profile.renderPresetId === 'glow_in_dark' &&
+    profile.previewMode === 'night' &&
+    secondaryColor
+  ) {
+    color.lerp(secondaryColor, 0.18)
+  }
+
+  return color
+}
+
+function applyPhysicalWrapPreset(
+  material: MeshPhysicalMaterial,
+  profile: WrapMaterialRenderProfile,
+) {
+  const preset = profile.renderPreset
+  const secondaryColor = profile.secondaryColorHex
+    ? getColorFromHex(profile.secondaryColorHex)
+    : null
+  const tertiaryColor = profile.tertiaryColorHex
+    ? getColorFromHex(profile.tertiaryColorHex)
+    : null
+
+  material.clearcoat = preset.clearcoat
+  material.clearcoatRoughness = preset.clearcoatRoughness
+  material.reflectivity = getWrapReflectivity(profile.renderPresetId)
+  material.transmission = 0
+  material.thickness = 0
+  material.iridescence = 0
+  material.iridescenceIOR = 1.3
+  material.iridescenceThicknessRange = [100, 420]
+  material.sheen = 0
+  material.sheenRoughness = 1
+  material.specularIntensity = 1
+  material.anisotropy = preset.anisotropy
+
+  if (profile.renderPresetId === 'pearl') {
+    material.iridescence = 0.18
+    material.sheen = 0.22
+    material.sheenRoughness = 0.42
+
+    if (secondaryColor) {
+      material.sheenColor.copy(secondaryColor)
+    }
+  }
+
+  if (profile.renderPresetId === 'color_shift') {
+    material.iridescence = 0.54
+    material.iridescenceThicknessRange = [190, 680]
+    material.sheen = 0.28
+    material.sheenRoughness = 0.36
+
+    if (secondaryColor) {
+      material.sheenColor.copy(secondaryColor)
+    }
+
+    if (tertiaryColor) {
+      material.specularColor.copy(tertiaryColor)
+    }
+  }
+
+  if (profile.renderPresetId === 'chrome') {
+    material.reflectivity = 1
+    material.specularIntensity = 1
+  }
+
+  if (profile.renderPresetId === 'fluorescent') {
+    material.specularIntensity = profile.previewMode === 'uv' ? 1.18 : 1.08
+  }
+
+  if (profile.renderPresetId === 'velvet') {
+    material.clearcoat = 0
+    material.clearcoatRoughness = 0.9
+    material.reflectivity = 0.14
+    material.sheen = 0.72
+    material.sheenRoughness = 0.78
+
+    if (secondaryColor) {
+      material.sheenColor.copy(secondaryColor)
+    }
+  }
+}
+
+function applyWrapEmission(
+  material: MeshStandardMaterial,
+  profile: WrapMaterialRenderProfile,
+) {
+  material.emissive.set(0, 0, 0)
+  material.emissiveIntensity = 0
+
+  if (profile.renderPresetId === 'fluorescent') {
+    const emissiveColor = profile.secondaryColorHex ?? profile.colorHex
+
+    material.emissive.copy(getColorFromHex(emissiveColor))
+    material.emissiveIntensity = profile.previewMode === 'uv' ? 0.085 : 0.028
+    return
+  }
+
+  if (
+    profile.renderPresetId === 'glow_in_dark' &&
+    profile.previewMode === 'night'
+  ) {
+    const emissiveColor =
+      profile.tertiaryColorHex ?? profile.secondaryColorHex ?? profile.colorHex
+
+    material.emissive.copy(getColorFromHex(emissiveColor))
+    material.emissiveIntensity = 0.32
+  }
+}
+
 function applyWrapToMaterial(material: Material, wrap: WrapConfig) {
   if (!(material instanceof MeshStandardMaterial)) {
     return
   }
 
-  const settings = wrapFinishSettings[wrap.finish]
+  const profile = resolveWrapMaterialRenderProfile(wrap)
+
+  if (!profile) {
+    return
+  }
 
   clearStandardMaterialTextureInputs(material)
   applySmoothOpaqueSurfaceDefaults(material)
 
-  material.color.setStyle(wrap.color, SRGBColorSpace)
-  material.emissive.set(0, 0, 0)
-  material.emissiveIntensity = 0
-  material.metalness = 0.02
-  material.roughness = settings.roughness
-  material.envMapIntensity = settings.envMapIntensity
+  material.color.copy(getWrapDisplayColor(profile))
+  material.metalness = profile.renderPreset.metalness
+  material.roughness = profile.renderPreset.roughness
+  material.envMapIntensity = getWrapEnvMapIntensity(profile.renderPresetId)
+  applyWrapEmission(material, profile)
+  applyWrapProceduralTexture(material, profile.renderPresetId)
 
   if (material instanceof MeshPhysicalMaterial) {
-    material.clearcoat = settings.clearcoat
-    material.clearcoatRoughness = settings.clearcoatRoughness
-    material.reflectivity = settings.reflectivity
+    applyPhysicalWrapPreset(material, profile)
   }
 
   material.needsUpdate = true

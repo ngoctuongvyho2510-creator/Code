@@ -1,3 +1,9 @@
+import type {
+  CustomWrapSelection,
+  OfficialWrapSelection,
+  WrapMaterialSelection,
+} from './materialCatalog'
+
 export type ServiceId =
   | 'wrap'
   | 'artwork'
@@ -63,10 +69,18 @@ export type SelectionTargetId = string
 
 export type WrapFinish = 'gloss' | 'satin' | 'matte'
 
-export type WrapConfig = {
+export type LegacyWrapConfig = {
   color: string
   finish: WrapFinish
 }
+
+export type WrapConfig = LegacyWrapConfig | WrapMaterialSelection
+
+export type WrapConfigPatch =
+  | Partial<LegacyWrapConfig>
+  | Partial<CustomWrapSelection>
+  | CustomWrapSelection
+  | OfficialWrapSelection
 
 export type TintScope = 'this' | 'pair' | 'rear' | 'all'
 

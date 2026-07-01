@@ -52,10 +52,14 @@ import type {
   TintConfig,
   TintScope,
   WrapConfig,
+  WrapConfigPatch,
   WrapFinish,
 } from '../types/configurator'
+import type { OfficialWrapSelection } from '../types/materialCatalog'
+import { normalizeCustomWrapSelection } from '../utils/materialCatalog'
 
 const DEFAULT_WRAP_CONFIG: WrapConfig = {
+  kind: 'custom',
   color: '#c49d59',
   finish: 'gloss',
 }
@@ -116,7 +120,7 @@ export type ConfiguratorAction =
     }
   | {
       type: 'update-wrap-draft'
-      patch: Partial<WrapConfig>
+      patch: WrapConfigPatch
     }
   | {
       type: 'update-tint-draft'
@@ -758,14 +762,61 @@ function createArtworkDraft(
 
 function updateWrapDraft(
   currentWrap: WrapConfig,
-  patch: Partial<WrapConfig>,
+  patch: WrapConfigPatch,
 ): WrapConfig {
-  const finish = patch.finish
+  if (isOfficialWrapPatch(patch)) {
+    return patch
+  }
+
+  return updateCustomWrapDraft(currentWrap, patch)
+}
+
+function updateCustomWrapDraft(
+  currentWrap: WrapConfig,
+  patch: WrapConfigPatch,
+): WrapConfig {
+  const currentCustomWrap = normalizeCustomWrapSelection(currentWrap)
+  const patchColor = getWrapPatchColor(patch)
+  const patchFinish = getWrapPatchFinish(patch)
 
   return {
-    color: patch.color ?? currentWrap.color,
-    finish: isWrapFinish(finish) ? finish : currentWrap.finish,
+    kind: 'custom',
+    color: patchColor ?? currentCustomWrap.color,
+    finish: isWrapFinish(patchFinish)
+      ? patchFinish
+      : currentCustomWrap.finish,
   }
+}
+
+function isOfficialWrapPatch(
+  patch: WrapConfigPatch,
+): patch is OfficialWrapSelection {
+  return (
+    getWrapPatchKind(patch) === 'official' &&
+    'materialId' in patch &&
+    'brand' in patch &&
+    'manufacturerCode' in patch &&
+    'displayName' in patch &&
+    'renderPresetId' in patch
+  )
+}
+
+function getWrapPatchKind(
+  patch: WrapConfigPatch,
+): 'custom' | 'official' | null {
+  if (!('kind' in patch)) {
+    return null
+  }
+
+  return patch.kind ?? null
+}
+
+function getWrapPatchColor(patch: WrapConfigPatch): string | undefined {
+  return 'color' in patch ? patch.color : undefined
+}
+
+function getWrapPatchFinish(patch: WrapConfigPatch): WrapFinish | undefined {
+  return 'finish' in patch ? patch.finish : undefined
 }
 
 function updateTintDraft(

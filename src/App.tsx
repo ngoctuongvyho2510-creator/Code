@@ -55,7 +55,7 @@ import type {
   TintConfig,
   TintScope,
   TintPreviewState,
-  WrapConfig,
+  WrapConfigPatch,
   WrapPreviewState,
 } from './types/configurator'
 import './App.css'
@@ -693,7 +693,7 @@ function App() {
     dispatch({ type: 'select-service', serviceId })
   }, [])
 
-  const handleUpdateWrapDraft = useCallback((patch: Partial<WrapConfig>) => {
+  const handleUpdateWrapDraft = useCallback((patch: WrapConfigPatch) => {
     dispatch({ type: 'update-wrap-draft', patch })
   }, [])
 

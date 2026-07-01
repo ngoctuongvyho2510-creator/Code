@@ -1,4 +1,14 @@
-import { memo, useState } from 'react'
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react'
+import {
+  filterOfficialMaterials,
+  materialCatalogBrandOptions,
+  materialCatalogFilterOptions,
+} from '../../data/materials/catalog'
 import { getService } from '../../config/services'
 import type {
   ArtworkDraftState,
@@ -33,8 +43,19 @@ import type {
   TintScopeOption,
   VehiclePartDefinition,
   WrapConfig,
+  WrapConfigPatch,
   WrapFinish,
 } from '../../types/configurator'
+import type {
+  MaterialCatalogBrandTab,
+  MaterialCatalogFilter,
+  MaterialCatalogItem,
+} from '../../types/materialCatalog'
+import {
+  getWrapCatalogBrandTab,
+  isOfficialWrapSelection,
+  normalizeCustomWrapSelection,
+} from '../../utils/materialCatalog'
 
 const wrapFinishOptions = [
   { id: 'gloss', label: 'Gloss' },
@@ -245,7 +266,7 @@ type PartServicePopupProps = {
   onUpdateChromeDeleteScope: (scope: ChromeDeleteScope) => void
   onUpdateTintDraft: (patch: Partial<TintConfig>) => void
   onUpdateTintScope: (scope: TintScope) => void
-  onUpdateWrapDraft: (patch: Partial<WrapConfig>) => void
+  onUpdateWrapDraft: (patch: WrapConfigPatch) => void
 }
 
 export const PartServicePopup = memo(function PartServicePopup({
@@ -377,7 +398,24 @@ export const PartServicePopup = memo(function PartServicePopup({
     !showCeramicEditor &&
     !showArtworkEditor &&
     !showFreeArtEditor
-  const syncedHexValue = wrapConfig?.color.toUpperCase() ?? '#C49D59'
+  const selectedWrapBrandTab = getWrapCatalogBrandTab(wrapConfig)
+  const [wrapBrandTab, setWrapBrandTab] =
+    useState<MaterialCatalogBrandTab>(selectedWrapBrandTab)
+  const [wrapFilter, setWrapFilter] =
+    useState<MaterialCatalogFilter>('all')
+
+  useEffect(() => {
+    if (showWrapEditor) {
+      setWrapBrandTab(selectedWrapBrandTab)
+    }
+  }, [selectedWrapBrandTab, showWrapEditor, target.id])
+
+  const customWrapConfig = normalizeCustomWrapSelection(wrapConfig)
+  const officialCatalogMaterials = useMemo(
+    () => filterOfficialMaterials(wrapBrandTab, wrapFilter),
+    [wrapBrandTab, wrapFilter],
+  )
+  const syncedHexValue = customWrapConfig.color.toUpperCase()
   const syncedChromeDeleteHexValue =
     chromeDeleteConfig?.color.toUpperCase() ?? '#050505'
   const syncedCaliperPaintHexValue =
@@ -433,11 +471,33 @@ export const PartServicePopup = memo(function PartServicePopup({
       : !lightTintShadeDarknessSet.has(lightTintConfig.darkness)
     : false
 
+  function handleWrapBrandSelect(brandTab: MaterialCatalogBrandTab) {
+    setWrapBrandTab(brandTab)
+
+    if (brandTab === 'Custom') {
+      onUpdateWrapDraft({ kind: 'custom' })
+    }
+  }
+
+  function handleOfficialMaterialSelect(material: MaterialCatalogItem) {
+    onUpdateWrapDraft({
+      kind: 'official',
+      materialId: material.id,
+      brand: material.brand,
+      manufacturerCode: material.manufacturerCode,
+      displayName: material.displayName,
+      renderPresetId: material.renderPresetId,
+    })
+  }
+
   function handleColorChange(color: string) {
     const normalizedColor = color.toUpperCase()
 
     setHexInput(null)
-    onUpdateWrapDraft({ color: normalizedColor.toLowerCase() })
+    onUpdateWrapDraft({
+      kind: 'custom',
+      color: normalizedColor.toLowerCase(),
+    })
   }
 
   function handleHexChange(value: string) {
@@ -453,7 +513,10 @@ export const PartServicePopup = memo(function PartServicePopup({
     setHexInput({ source: syncedHexValue, value: prefixedValue })
 
     if (validHexColorPattern.test(prefixedValue)) {
-      onUpdateWrapDraft({ color: prefixedValue.toLowerCase() })
+      onUpdateWrapDraft({
+        kind: 'custom',
+        color: prefixedValue.toLowerCase(),
+      })
     }
   }
 
@@ -766,47 +829,146 @@ export const PartServicePopup = memo(function PartServicePopup({
 
       {showWrapEditor && wrapConfig ? (
         <div className="part-popup-wrap" aria-label="Wrap options">
-          <label className="part-popup-field">
-            <span>Color</span>
-            <div className="part-popup-color-row">
-              <input
-                type="color"
-                className="part-popup-color-input"
-                value={wrapConfig.color}
-                onChange={(event) =>
-                  handleColorChange(event.currentTarget.value)
-                }
-              />
-              <input
-                type="text"
-                className="part-popup-hex-input"
-                aria-label="Hex color"
-                inputMode="text"
-                maxLength={7}
-                spellCheck={false}
-                value={hexValue}
-                onBlur={handleHexBlur}
-                onChange={(event) => handleHexChange(event.currentTarget.value)}
-              />
-            </div>
-          </label>
-
           <div>
-            <p className="part-popup-finish-label">Finish</p>
-            <div className="part-popup-finish-grid" aria-label="Finish">
-              {wrapFinishOptions.map((finish) => (
+            <p className="part-popup-finish-label">Brand</p>
+            <div
+              className="part-popup-tab-grid part-popup-tab-grid--brand"
+              aria-label="Brand"
+            >
+              {materialCatalogBrandOptions.map((brand) => (
                 <button
                   type="button"
                   className="part-popup-finish"
-                  data-selected={wrapConfig.finish === finish.id}
-                  key={finish.id}
-                  onClick={() => onUpdateWrapDraft({ finish: finish.id })}
+                  data-selected={wrapBrandTab === brand.id}
+                  key={brand.id}
+                  onClick={() => handleWrapBrandSelect(brand.id)}
                 >
-                  {finish.label}
+                  {brand.label}
                 </button>
               ))}
             </div>
           </div>
+
+          {wrapBrandTab !== 'Custom' ? (
+            <div>
+              <p className="part-popup-finish-label">Filter</p>
+              <div
+                className="part-popup-tab-grid part-popup-tab-grid--filter"
+                aria-label="Material filter"
+              >
+                {materialCatalogFilterOptions.map((filter) => (
+                  <button
+                    type="button"
+                    className="part-popup-finish"
+                    data-selected={wrapFilter === filter.id}
+                    key={filter.id}
+                    onClick={() => setWrapFilter(filter.id)}
+                  >
+                    {filter.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {wrapBrandTab === 'Custom' ? (
+            <>
+              <label className="part-popup-field">
+                <span>Color</span>
+                <div className="part-popup-color-row">
+                  <input
+                    type="color"
+                    className="part-popup-color-input"
+                    value={customWrapConfig.color}
+                    onChange={(event) =>
+                      handleColorChange(event.currentTarget.value)
+                    }
+                  />
+                  <input
+                    type="text"
+                    className="part-popup-hex-input"
+                    aria-label="Hex color"
+                    inputMode="text"
+                    maxLength={7}
+                    spellCheck={false}
+                    value={hexValue}
+                    onBlur={handleHexBlur}
+                    onChange={(event) =>
+                      handleHexChange(event.currentTarget.value)
+                    }
+                  />
+                </div>
+              </label>
+
+              <div>
+                <p className="part-popup-finish-label">Finish</p>
+                <div className="part-popup-finish-grid" aria-label="Finish">
+                  {wrapFinishOptions.map((finish) => (
+                    <button
+                      type="button"
+                      className="part-popup-finish"
+                      data-selected={customWrapConfig.finish === finish.id}
+                      key={finish.id}
+                      onClick={() =>
+                        onUpdateWrapDraft({
+                          kind: 'custom',
+                          finish: finish.id,
+                        })
+                      }
+                    >
+                      {finish.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div>
+              <p className="part-popup-finish-label">Materials</p>
+              {officialCatalogMaterials.length > 0 ? (
+                <div
+                  className="part-popup-material-grid"
+                  aria-label="Official materials"
+                >
+                  {officialCatalogMaterials.map((material) => (
+                    <button
+                      type="button"
+                      className="part-popup-material"
+                      data-selected={
+                        isOfficialWrapSelection(wrapConfig) &&
+                        wrapConfig.materialId === material.id
+                      }
+                      key={material.id}
+                      onClick={() => handleOfficialMaterialSelect(material)}
+                    >
+                      <img
+                        alt=""
+                        className="part-popup-swatch"
+                        draggable={false}
+                        src={material.swatchAsset}
+                      />
+                      <span className="part-popup-material-text">
+                        <span className="part-popup-material-name">
+                          {material.displayName}
+                        </span>
+                        <span className="part-popup-material-code">
+                          {material.manufacturerCode}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="part-popup-file-name">
+                  No matching materials.
+                </p>
+              )}
+            </div>
+          )}
+
+          <p className="part-popup-disclaimer">
+            Digital preview. Actual film may vary.
+          </p>
         </div>
       ) : null}
 
