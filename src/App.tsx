@@ -1,4 +1,4 @@
-import { useMemo, useReducer, useRef, type PointerEvent } from 'react'
+import { useCallback, useMemo, useReducer, useRef, type PointerEvent } from 'react'
 import {
   FULL_BODY_PART_IDS,
   FULL_BODY_TARGET_ID,
@@ -28,16 +28,34 @@ import {
   initialConfiguratorState,
 } from './state/configuratorReducer'
 import type {
+  ArtworkDraftState,
   ArtworkPreviewState,
+  CaliperPaintConfig,
+  CaliperPaintScope,
   CaliperPaintPreviewState,
+  CeramicConfig,
+  CeramicScope,
   CeramicPreviewState,
+  ChromeDeleteConfig,
+  ChromeDeleteScope,
   ChromeDeletePreviewState,
   FreeArtworkItem,
+  FreeArtworkDraftState,
   FreeArtworkPreviewState,
+  LightTintConfig,
+  LightTintScope,
   LightTintPreviewState,
+  PpfConfig,
+  PpfScope,
   PpfPreviewState,
+  PowderCoatConfig,
+  PowderCoatScope,
   PowderCoatPreviewState,
+  ServiceId,
+  TintConfig,
+  TintScope,
   TintPreviewState,
+  WrapConfig,
   WrapPreviewState,
 } from './types/configurator'
 import './App.css'
@@ -377,41 +395,50 @@ function App() {
     configuratorState.draftSelection?.serviceId === 'tint'
       ? configuratorState.draftSelection.tintScope
       : null
-  const tintScopeOptions = activeTarget
-    ? getTintScopeOptions(activeTarget.id)
-    : []
+  const tintScopeOptions = useMemo(
+    () => (activeTarget ? getTintScopeOptions(activeTarget.id) : []),
+    [activeTarget],
+  )
   const activeLightTintScope =
     configuratorState.draftSelection?.serviceId === 'tint'
       ? configuratorState.draftSelection.lightTintScope
       : null
-  const lightTintScopeOptions = activeTarget
-    ? getLightTintScopeOptions(activeTarget.id)
-    : []
+  const lightTintScopeOptions = useMemo(
+    () => (activeTarget ? getLightTintScopeOptions(activeTarget.id) : []),
+    [activeTarget],
+  )
   const activeChromeDeleteScope =
     configuratorState.draftSelection?.serviceId === 'chrome-delete'
       ? configuratorState.draftSelection.chromeDeleteScope
       : null
-  const chromeDeleteScopeOptions = activeTarget
-    ? getChromeDeleteScopeOptions(activeTarget.id)
-    : []
+  const chromeDeleteScopeOptions = useMemo(
+    () => (activeTarget ? getChromeDeleteScopeOptions(activeTarget.id) : []),
+    [activeTarget],
+  )
   const activeCaliperPaintScope =
     configuratorState.draftSelection?.serviceId === 'caliper-paint'
       ? configuratorState.draftSelection.caliperPaintScope
       : null
-  const caliperPaintScopeOptions = activeTarget
-    ? getCaliperPaintScopeOptions(activeTarget.id)
-    : []
+  const caliperPaintScopeOptions = useMemo(
+    () => (activeTarget ? getCaliperPaintScopeOptions(activeTarget.id) : []),
+    [activeTarget],
+  )
   const activePowderCoatScope =
     configuratorState.draftSelection?.serviceId === 'powder-coat'
       ? configuratorState.draftSelection.powderCoatScope
       : null
-  const powderCoatScopeOptions = activeTarget
-    ? getPowderCoatScopeOptions(activeTarget.id)
-    : []
-  const ppfScopeOptions = activeTarget ? getPpfScopeOptions(activeTarget.id) : []
-  const ceramicScopeOptions = activeTarget
-    ? getCeramicScopeOptions(activeTarget.id)
-    : []
+  const powderCoatScopeOptions = useMemo(
+    () => (activeTarget ? getPowderCoatScopeOptions(activeTarget.id) : []),
+    [activeTarget],
+  )
+  const ppfScopeOptions = useMemo(
+    () => (activeTarget ? getPpfScopeOptions(activeTarget.id) : []),
+    [activeTarget],
+  )
+  const ceramicScopeOptions = useMemo(
+    () => (activeTarget ? getCeramicScopeOptions(activeTarget.id) : []),
+    [activeTarget],
+  )
   const canResetTint =
     activeTarget && activeTintScope
       ? resolveTintScopeTargetIds(activeTarget.id, activeTintScope).some(
@@ -477,7 +504,305 @@ function App() {
       (item) => item.id === activeFreeArtworkConfig.selectedItemId,
     ) ?? null
 
-  function handleShellPointerDown(event: PointerEvent<HTMLElement>) {
+  const handleArtworkPreviewTransformChange = useCallback(
+    (patch: Partial<ArtworkDraftState>) =>
+      dispatch({ type: 'update-artwork-draft', patch }),
+    [],
+  )
+
+  const handleFreeArtworkTransformChange = useCallback(
+    (artworkId: string, patch: Partial<FreeArtworkItem>) =>
+      dispatch({
+        type: 'update-free-artwork-item',
+        artworkId,
+        patch,
+      }),
+    [],
+  )
+
+  const handlePartSelect = useCallback((partId: string) => {
+    dispatch({ type: 'select-target', targetId: partId })
+  }, [])
+
+  const handleCancelDraft = useCallback(() => {
+    dispatch({ type: 'cancel-draft' })
+  }, [])
+
+  const handleFullBodySelect = useCallback(() => {
+    dispatch({ type: 'select-target', targetId: FULL_BODY_TARGET_ID })
+  }, [])
+
+  const handleApply = useCallback(() => {
+    dispatch({ type: 'apply-draft' })
+  }, [])
+
+  const handleApplyAll = useCallback(() => {
+    if (configuratorState.draftSelection?.serviceId === 'ceramic') {
+      dispatch({ type: 'apply-ceramic-all' })
+      return
+    }
+
+    if (configuratorState.draftSelection?.serviceId === 'ppf') {
+      dispatch({ type: 'apply-ppf-all' })
+      return
+    }
+
+    dispatch({ type: 'apply-wrap-all' })
+  }, [configuratorState.draftSelection?.serviceId])
+
+  const handleBack = useCallback(() => {
+    if (configuratorState.draftSelection?.serviceId) {
+      dispatch({ type: 'clear-service' })
+    } else {
+      dispatch({ type: 'cancel-draft' })
+    }
+  }, [configuratorState.draftSelection?.serviceId])
+
+  const handleResetAllWraps = useCallback(() => {
+    dispatch({ type: 'reset-all-wraps' })
+  }, [])
+
+  const handleResetAllPpf = useCallback(() => {
+    dispatch({ type: 'reset-all-ppf' })
+  }, [])
+
+  const handleResetAllCeramic = useCallback(() => {
+    dispatch({ type: 'reset-all-ceramic' })
+  }, [])
+
+  const handleResetCaliperPaint = useCallback(() => {
+    if (!activeTarget || !activeCaliperPaintScope) {
+      return
+    }
+
+    dispatch({
+      type: 'reset-caliper-paint',
+      targetId: activeTarget.id,
+      scope: activeCaliperPaintScope,
+    })
+  }, [activeCaliperPaintScope, activeTarget])
+
+  const handleResetPowderCoat = useCallback(() => {
+    if (!activeTarget || !activePowderCoatScope) {
+      return
+    }
+
+    dispatch({
+      type: 'reset-powder-coat',
+      targetId: activeTarget.id,
+      scope: activePowderCoatScope,
+    })
+  }, [activePowderCoatScope, activeTarget])
+
+  const handleResetChromeDelete = useCallback(() => {
+    if (!activeTarget || !activeChromeDeleteScope) {
+      return
+    }
+
+    dispatch({
+      type: 'reset-chrome-delete',
+      targetId: activeTarget.id,
+      scope: activeChromeDeleteScope,
+    })
+  }, [activeChromeDeleteScope, activeTarget])
+
+  const handleResetLightTint = useCallback(() => {
+    if (!activeTarget || !activeLightTintScope) {
+      return
+    }
+
+    dispatch({
+      type: 'reset-light-tint',
+      targetId: activeTarget.id,
+      scope: activeLightTintScope,
+    })
+  }, [activeLightTintScope, activeTarget])
+
+  const handleResetTint = useCallback(() => {
+    if (!activeTarget || !activeTintScope) {
+      return
+    }
+
+    dispatch({
+      type: 'reset-tint',
+      targetId: activeTarget.id,
+      scope: activeTintScope,
+    })
+  }, [activeTarget, activeTintScope])
+
+  const handleResetPpf = useCallback(() => {
+    if (activeTarget) {
+      dispatch({ type: 'reset-ppf', targetId: activeTarget.id })
+    }
+  }, [activeTarget])
+
+  const handleResetCeramic = useCallback(() => {
+    if (activeTarget) {
+      dispatch({ type: 'reset-ceramic', targetId: activeTarget.id })
+    }
+  }, [activeTarget])
+
+  const handleResetWrap = useCallback(() => {
+    if (activeTarget) {
+      dispatch({ type: 'reset-wrap', targetId: activeTarget.id })
+    }
+  }, [activeTarget])
+
+  const handleRemoveArtwork = useCallback(() => {
+    if (!activeTarget || !activeArtworkId) {
+      return
+    }
+
+    dispatch({
+      type: 'remove-artwork',
+      targetId: activeTarget.id,
+      artworkId: activeArtworkId,
+    })
+  }, [activeArtworkId, activeTarget])
+
+  const handleRemoveAllArtwork = useCallback(() => {
+    if (activeTarget) {
+      dispatch({
+        type: 'remove-all-artwork',
+        targetId: activeTarget.id,
+      })
+    }
+  }, [activeTarget])
+
+  const handleAddFreeArtwork = useCallback(() => {
+    dispatch({ type: 'add-free-artwork' })
+  }, [])
+
+  const handleDeleteAllFreeArtwork = useCallback(() => {
+    dispatch({ type: 'delete-all-free-artwork' })
+  }, [])
+
+  const handleDeleteFreeArtwork = useCallback((artworkId: string) => {
+    dispatch({ type: 'delete-free-artwork', artworkId })
+  }, [])
+
+  const handleDuplicateFreeArtwork = useCallback((artworkId: string) => {
+    dispatch({ type: 'duplicate-free-artwork', artworkId })
+  }, [])
+
+  const handleSelectFreeArtwork = useCallback((artworkId: string) => {
+    dispatch({ type: 'select-free-artwork', artworkId })
+  }, [])
+
+  const handleSelectService = useCallback((serviceId: ServiceId) => {
+    dispatch({ type: 'select-service', serviceId })
+  }, [])
+
+  const handleUpdateWrapDraft = useCallback((patch: Partial<WrapConfig>) => {
+    dispatch({ type: 'update-wrap-draft', patch })
+  }, [])
+
+  const handleUpdateTintDraft = useCallback((patch: Partial<TintConfig>) => {
+    dispatch({ type: 'update-tint-draft', patch })
+  }, [])
+
+  const handleUpdateTintScope = useCallback((scope: TintScope) => {
+    dispatch({ type: 'update-tint-scope', scope })
+  }, [])
+
+  const handleUpdateLightTintDraft = useCallback(
+    (patch: Partial<LightTintConfig>) => {
+      dispatch({ type: 'update-light-tint-draft', patch })
+    },
+    [],
+  )
+
+  const handleUpdateLightTintScope = useCallback((scope: LightTintScope) => {
+    dispatch({ type: 'update-light-tint-scope', scope })
+  }, [])
+
+  const handleUpdateChromeDeleteDraft = useCallback(
+    (patch: Partial<ChromeDeleteConfig>) => {
+      dispatch({ type: 'update-chrome-delete-draft', patch })
+    },
+    [],
+  )
+
+  const handleUpdateChromeDeleteScope = useCallback(
+    (scope: ChromeDeleteScope) => {
+      dispatch({ type: 'update-chrome-delete-scope', scope })
+    },
+    [],
+  )
+
+  const handleUpdateCaliperPaintDraft = useCallback(
+    (patch: Partial<CaliperPaintConfig>) => {
+      dispatch({ type: 'update-caliper-paint-draft', patch })
+    },
+    [],
+  )
+
+  const handleUpdateCaliperPaintScope = useCallback(
+    (scope: CaliperPaintScope) => {
+      dispatch({ type: 'update-caliper-paint-scope', scope })
+    },
+    [],
+  )
+
+  const handleUpdatePowderCoatDraft = useCallback(
+    (patch: Partial<PowderCoatConfig>) => {
+      dispatch({ type: 'update-powder-coat-draft', patch })
+    },
+    [],
+  )
+
+  const handleUpdatePowderCoatScope = useCallback(
+    (scope: PowderCoatScope) => {
+      dispatch({ type: 'update-powder-coat-scope', scope })
+    },
+    [],
+  )
+
+  const handleUpdatePpfDraft = useCallback((patch: Partial<PpfConfig>) => {
+    dispatch({ type: 'update-ppf-draft', patch })
+  }, [])
+
+  const handleUpdatePpfScope = useCallback((scope: PpfScope) => {
+    dispatch({ type: 'update-ppf-scope', scope })
+  }, [])
+
+  const handleUpdateCeramicDraft = useCallback(
+    (patch: Partial<CeramicConfig>) => {
+      dispatch({ type: 'update-ceramic-draft', patch })
+    },
+    [],
+  )
+
+  const handleUpdateCeramicScope = useCallback((scope: CeramicScope) => {
+    dispatch({ type: 'update-ceramic-scope', scope })
+  }, [])
+
+  const handleUpdateArtworkDraft = useCallback(
+    (patch: Partial<ArtworkDraftState>) => {
+      dispatch({ type: 'update-artwork-draft', patch })
+    },
+    [],
+  )
+
+  const handleUpdateFreeArtworkItem = useCallback(
+    (artworkId: string, patch: Partial<FreeArtworkItem>) => {
+      dispatch({
+        type: 'update-free-artwork-item',
+        artworkId,
+        patch,
+      })
+    },
+    [],
+  )
+
+  const handleUpdateFreeArtworkUpload = useCallback(
+    (patch: Partial<FreeArtworkDraftState>) => {
+      dispatch({ type: 'update-free-artwork-upload', patch })
+    },
+    [],
+  )
+
+  const handleShellPointerDown = useCallback((event: PointerEvent<HTMLElement>) => {
     if (!configuratorState.draftSelection) {
       return
     }
@@ -494,15 +819,7 @@ function App() {
     }
 
     dispatch({ type: 'cancel-draft' })
-  }
-
-  function handleBack() {
-    if (configuratorState.draftSelection?.serviceId) {
-      dispatch({ type: 'clear-service' })
-    } else {
-      dispatch({ type: 'cancel-draft' })
-    }
-  }
+  }, [configuratorState.draftSelection])
 
   return (
     <main
@@ -548,27 +865,17 @@ function App() {
             selectedTargetId={configuratorState.draftSelection?.targetId ?? null}
             tintPreview={tintPreview}
             wrapPreview={wrapPreview}
-            onArtworkPreviewTransformChange={(patch) =>
-              dispatch({ type: 'update-artwork-draft', patch })
+            onArtworkPreviewTransformChange={
+              handleArtworkPreviewTransformChange
             }
-            onFreeArtworkTransformChange={(artworkId, patch) =>
-              dispatch({
-                type: 'update-free-artwork-item',
-                artworkId,
-                patch,
-              })
-            }
-            onPartSelect={(partId) =>
-              dispatch({ type: 'select-target', targetId: partId })
-            }
-            onScenePointerMissed={() => dispatch({ type: 'cancel-draft' })}
+            onFreeArtworkTransformChange={handleFreeArtworkTransformChange}
+            onPartSelect={handlePartSelect}
+            onScenePointerMissed={handleCancelDraft}
           />
           <button
             type="button"
             className="full-body-action"
-            onClick={() =>
-              dispatch({ type: 'select-target', targetId: FULL_BODY_TARGET_ID })
-            }
+            onClick={handleFullBodySelect}
           >
             Full Body
           </button>
@@ -650,168 +957,48 @@ function App() {
               canResetWrap={activeTargetHasDirectWrap}
               canRemoveArtwork={Boolean(activeArtworkId)}
               canRemoveAllArtwork={activeTargetArtwork.length > 0}
-              onApply={() => dispatch({ type: 'apply-draft' })}
-              onApplyAll={() =>
-                configuratorState.draftSelection?.serviceId === 'ceramic'
-                  ? dispatch({ type: 'apply-ceramic-all' })
-                  : configuratorState.draftSelection?.serviceId === 'ppf'
-                    ? dispatch({ type: 'apply-ppf-all' })
-                    : dispatch({ type: 'apply-wrap-all' })
-              }
+              onApply={handleApply}
+              onApplyAll={handleApplyAll}
               onBack={handleBack}
-              onCancel={() => dispatch({ type: 'cancel-draft' })}
-              onClose={() => dispatch({ type: 'cancel-draft' })}
-              onResetAllWraps={() => dispatch({ type: 'reset-all-wraps' })}
-              onResetAllPpf={() => dispatch({ type: 'reset-all-ppf' })}
-              onResetAllCeramic={() =>
-                dispatch({ type: 'reset-all-ceramic' })
-              }
-              onResetCaliperPaint={() =>
-                activeCaliperPaintScope
-                  ? dispatch({
-                      type: 'reset-caliper-paint',
-                      targetId: activeTarget.id,
-                      scope: activeCaliperPaintScope,
-                    })
-                  : undefined
-              }
-              onResetPowderCoat={() =>
-                activePowderCoatScope
-                  ? dispatch({
-                      type: 'reset-powder-coat',
-                      targetId: activeTarget.id,
-                      scope: activePowderCoatScope,
-                    })
-                  : undefined
-              }
-              onResetChromeDelete={() =>
-                activeChromeDeleteScope
-                  ? dispatch({
-                      type: 'reset-chrome-delete',
-                      targetId: activeTarget.id,
-                      scope: activeChromeDeleteScope,
-                    })
-                  : undefined
-              }
-              onResetLightTint={() =>
-                activeLightTintScope
-                  ? dispatch({
-                      type: 'reset-light-tint',
-                      targetId: activeTarget.id,
-                      scope: activeLightTintScope,
-                    })
-                  : undefined
-              }
-              onResetTint={() =>
-                activeTintScope
-                  ? dispatch({
-                      type: 'reset-tint',
-                      targetId: activeTarget.id,
-                      scope: activeTintScope,
-                    })
-                  : undefined
-              }
-              onResetPpf={() =>
-                dispatch({ type: 'reset-ppf', targetId: activeTarget.id })
-              }
-              onResetCeramic={() =>
-                dispatch({ type: 'reset-ceramic', targetId: activeTarget.id })
-              }
-              onResetWrap={() =>
-                dispatch({ type: 'reset-wrap', targetId: activeTarget.id })
-              }
-              onRemoveArtwork={() =>
-                activeArtworkId
-                  ? dispatch({
-                      type: 'remove-artwork',
-                      targetId: activeTarget.id,
-                      artworkId: activeArtworkId,
-                    })
-                  : undefined
-              }
-              onRemoveAllArtwork={() =>
-                dispatch({
-                  type: 'remove-all-artwork',
-                  targetId: activeTarget.id,
-                })
-              }
-              onAddFreeArtwork={() => dispatch({ type: 'add-free-artwork' })}
-              onDeleteAllFreeArtwork={() =>
-                dispatch({ type: 'delete-all-free-artwork' })
-              }
-              onDeleteFreeArtwork={(artworkId) =>
-                dispatch({ type: 'delete-free-artwork', artworkId })
-              }
-              onDuplicateFreeArtwork={(artworkId) =>
-                dispatch({ type: 'duplicate-free-artwork', artworkId })
-              }
-              onSelectFreeArtwork={(artworkId) =>
-                dispatch({ type: 'select-free-artwork', artworkId })
-              }
-              onSelectService={(serviceId) =>
-                dispatch({ type: 'select-service', serviceId })
-              }
-              onUpdateWrapDraft={(patch) =>
-                dispatch({ type: 'update-wrap-draft', patch })
-              }
-              onUpdateTintDraft={(patch) =>
-                dispatch({ type: 'update-tint-draft', patch })
-              }
-              onUpdateTintScope={(scope) =>
-                dispatch({ type: 'update-tint-scope', scope })
-              }
-              onUpdateLightTintDraft={(patch) =>
-                dispatch({ type: 'update-light-tint-draft', patch })
-              }
-              onUpdateLightTintScope={(scope) =>
-                dispatch({ type: 'update-light-tint-scope', scope })
-              }
-              onUpdateChromeDeleteDraft={(patch) =>
-                dispatch({ type: 'update-chrome-delete-draft', patch })
-              }
-              onUpdateChromeDeleteScope={(scope) =>
-                dispatch({ type: 'update-chrome-delete-scope', scope })
-              }
-              onUpdateCaliperPaintDraft={(patch) =>
-                dispatch({ type: 'update-caliper-paint-draft', patch })
-              }
-              onUpdateCaliperPaintScope={(scope) =>
-                dispatch({ type: 'update-caliper-paint-scope', scope })
-              }
-              onUpdatePowderCoatDraft={(patch) =>
-                dispatch({ type: 'update-powder-coat-draft', patch })
-              }
-              onUpdatePowderCoatScope={(scope) =>
-                dispatch({ type: 'update-powder-coat-scope', scope })
-              }
-              onUpdatePpfDraft={(patch) =>
-                dispatch({ type: 'update-ppf-draft', patch })
-              }
-              onUpdatePpfScope={(scope) =>
-                dispatch({ type: 'update-ppf-scope', scope })
-              }
-              onUpdateCeramicDraft={(patch) =>
-                dispatch({ type: 'update-ceramic-draft', patch })
-              }
-              onUpdateCeramicScope={(scope) =>
-                dispatch({ type: 'update-ceramic-scope', scope })
-              }
-              onUpdateArtworkDraft={(patch) =>
-                dispatch({ type: 'update-artwork-draft', patch })
-              }
-              onUpdateFreeArtworkItem={(
-                artworkId: string,
-                patch: Partial<FreeArtworkItem>,
-              ) =>
-                dispatch({
-                  type: 'update-free-artwork-item',
-                  artworkId,
-                  patch,
-                })
-              }
-              onUpdateFreeArtworkUpload={(patch) =>
-                dispatch({ type: 'update-free-artwork-upload', patch })
-              }
+              onCancel={handleCancelDraft}
+              onClose={handleCancelDraft}
+              onResetAllWraps={handleResetAllWraps}
+              onResetAllPpf={handleResetAllPpf}
+              onResetAllCeramic={handleResetAllCeramic}
+              onResetCaliperPaint={handleResetCaliperPaint}
+              onResetPowderCoat={handleResetPowderCoat}
+              onResetChromeDelete={handleResetChromeDelete}
+              onResetLightTint={handleResetLightTint}
+              onResetTint={handleResetTint}
+              onResetPpf={handleResetPpf}
+              onResetCeramic={handleResetCeramic}
+              onResetWrap={handleResetWrap}
+              onRemoveArtwork={handleRemoveArtwork}
+              onRemoveAllArtwork={handleRemoveAllArtwork}
+              onAddFreeArtwork={handleAddFreeArtwork}
+              onDeleteAllFreeArtwork={handleDeleteAllFreeArtwork}
+              onDeleteFreeArtwork={handleDeleteFreeArtwork}
+              onDuplicateFreeArtwork={handleDuplicateFreeArtwork}
+              onSelectFreeArtwork={handleSelectFreeArtwork}
+              onSelectService={handleSelectService}
+              onUpdateWrapDraft={handleUpdateWrapDraft}
+              onUpdateTintDraft={handleUpdateTintDraft}
+              onUpdateTintScope={handleUpdateTintScope}
+              onUpdateLightTintDraft={handleUpdateLightTintDraft}
+              onUpdateLightTintScope={handleUpdateLightTintScope}
+              onUpdateChromeDeleteDraft={handleUpdateChromeDeleteDraft}
+              onUpdateChromeDeleteScope={handleUpdateChromeDeleteScope}
+              onUpdateCaliperPaintDraft={handleUpdateCaliperPaintDraft}
+              onUpdateCaliperPaintScope={handleUpdateCaliperPaintScope}
+              onUpdatePowderCoatDraft={handleUpdatePowderCoatDraft}
+              onUpdatePowderCoatScope={handleUpdatePowderCoatScope}
+              onUpdatePpfDraft={handleUpdatePpfDraft}
+              onUpdatePpfScope={handleUpdatePpfScope}
+              onUpdateCeramicDraft={handleUpdateCeramicDraft}
+              onUpdateCeramicScope={handleUpdateCeramicScope}
+              onUpdateArtworkDraft={handleUpdateArtworkDraft}
+              onUpdateFreeArtworkItem={handleUpdateFreeArtworkItem}
+              onUpdateFreeArtworkUpload={handleUpdateFreeArtworkUpload}
             />
           ) : null}
         </section>

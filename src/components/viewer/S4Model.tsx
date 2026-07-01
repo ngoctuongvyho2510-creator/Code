@@ -111,6 +111,8 @@ const PROJECTOR_AXIS = new Vector3(0, 0, 1)
 type ModelMesh = Mesh<BufferGeometry, Material | Material[], Object3DEventMap>
 
 type PreparedModelScene = {
+  caliperPaintMeshes: ModelMesh[]
+  chromeDeleteMeshes: ModelMesh[]
   fallbackPlateSurfaceNames: string[]
   foundCaliperPaintMeshNames: Set<string>
   foundChromeDeleteMeshNames: Set<string>
@@ -118,10 +120,16 @@ type PreparedModelScene = {
   foundPowderCoatMeshNames: Set<string>
   foundTintableMeshNames: Set<string>
   foundWrapCapableMeshNames: Set<string>
+  lightTintMeshes: ModelMesh[]
   nativePlateMeshNames: Set<string>
   originalFactoryMaterialsByMeshUuid: Map<string, Material | Material[]>
+  outlineGeometriesByMeshUuid: Map<string, EdgesGeometry>
+  powderCoatMeshes: ModelMesh[]
   runtimeFactoryMaterialsByMeshUuid: Map<string, Material | Material[]>
   scene: Object3D
+  selectableMeshes: ModelMesh[]
+  tintableMeshes: ModelMesh[]
+  wrapCapableMeshes: ModelMesh[]
 }
 
 type ModelInventoryRow = {
@@ -880,6 +888,8 @@ function prepareModelScene(
   nativePlateTexture: Texture,
   surfacePlateTexture: Texture,
 ): PreparedModelScene {
+  const caliperPaintMeshes: ModelMesh[] = []
+  const chromeDeleteMeshes: ModelMesh[] = []
   const fallbackPlateSurfaceNames: string[] = []
   const foundCaliperPaintMeshNames = new Set<string>()
   const foundChromeDeleteMeshNames = new Set<string>()
@@ -887,15 +897,21 @@ function prepareModelScene(
   const foundPowderCoatMeshNames = new Set<string>()
   const foundTintableMeshNames = new Set<string>()
   const foundWrapCapableMeshNames = new Set<string>()
+  const lightTintMeshes: ModelMesh[] = []
   const nativePlateMeshNames = new Set<string>()
   const originalFactoryMaterialsByMeshUuid = new Map<
     string,
     Material | Material[]
   >()
+  const outlineGeometriesByMeshUuid = new Map<string, EdgesGeometry>()
+  const powderCoatMeshes: ModelMesh[] = []
   const runtimeFactoryMaterialsByMeshUuid = new Map<
     string,
     Material | Material[]
   >()
+  const selectableMeshes: ModelMesh[] = []
+  const tintableMeshes: ModelMesh[] = []
+  const wrapCapableMeshes: ModelMesh[] = []
 
   scene.traverse((object) => {
     if (!isModelMesh(object)) {
@@ -918,29 +934,40 @@ function prepareModelScene(
     const cleanBlackExteriorTrim = cleanBlackExteriorTrimMeshNames.has(
       object.name,
     )
+    const selectablePart = getSelectablePartByMeshName(object.name)
+
+    if (selectablePart) {
+      selectableMeshes.push(object)
+    }
 
     if (wrapCapable) {
       foundWrapCapableMeshNames.add(object.name)
+      wrapCapableMeshes.push(object)
     }
 
     if (chromeDeleteCapable) {
       foundChromeDeleteMeshNames.add(object.name)
+      chromeDeleteMeshes.push(object)
     }
 
     if (caliperPaintCapable) {
       foundCaliperPaintMeshNames.add(object.name)
+      caliperPaintMeshes.push(object)
     }
 
     if (powderCoatCapable) {
       foundPowderCoatMeshNames.add(object.name)
+      powderCoatMeshes.push(object)
     }
 
     if (lightTintCapable) {
       foundLightTintMeshNames.add(object.name)
+      lightTintMeshes.push(object)
     }
 
     if (tintCapable) {
       foundTintableMeshNames.add(object.name)
+      tintableMeshes.push(object)
     }
 
     if (plateMeshNames.has(object.name)) {
@@ -975,6 +1002,8 @@ function prepareModelScene(
   applyShadowSettings(scene)
 
   return {
+    caliperPaintMeshes,
+    chromeDeleteMeshes,
     fallbackPlateSurfaceNames,
     foundCaliperPaintMeshNames,
     foundChromeDeleteMeshNames,
@@ -982,10 +1011,16 @@ function prepareModelScene(
     foundPowderCoatMeshNames,
     foundTintableMeshNames,
     foundWrapCapableMeshNames,
+    lightTintMeshes,
     nativePlateMeshNames,
     originalFactoryMaterialsByMeshUuid,
+    outlineGeometriesByMeshUuid,
+    powderCoatMeshes,
     runtimeFactoryMaterialsByMeshUuid,
     scene,
+    selectableMeshes,
+    tintableMeshes,
+    wrapCapableMeshes,
   }
 }
 
@@ -998,6 +1033,46 @@ function disposeMaterial(material: Material | Material[]) {
   }
 
   material.dispose()
+}
+
+function disposeMaterialMap(materialsByMeshUuid: Map<string, Material | Material[]>) {
+  for (const material of materialsByMeshUuid.values()) {
+    disposeMaterial(material)
+  }
+
+  materialsByMeshUuid.clear()
+}
+
+function disposePreparedModelScene(preparedScene: PreparedModelScene) {
+  removeExistingOutlines(preparedScene.scene)
+
+  const disposedMaterials = new Set<Material>()
+
+  preparedScene.scene.traverse((object) => {
+    if (!isModelMesh(object)) {
+      return
+    }
+
+    for (const material of getMaterials(object.material)) {
+      if (!disposedMaterials.has(material)) {
+        material.dispose()
+        disposedMaterials.add(material)
+      }
+    }
+
+    if (object.userData.modifyWrapPlateSurface === true) {
+      object.geometry.dispose()
+    }
+  })
+
+  disposeMaterialMap(preparedScene.originalFactoryMaterialsByMeshUuid)
+  disposeMaterialMap(preparedScene.runtimeFactoryMaterialsByMeshUuid)
+
+  for (const geometry of preparedScene.outlineGeometriesByMeshUuid.values()) {
+    geometry.dispose()
+  }
+
+  preparedScene.outlineGeometriesByMeshUuid.clear()
 }
 
 function removeExistingOutlines(scene: Object3D) {
@@ -1013,17 +1088,42 @@ function removeExistingOutlines(scene: Object3D) {
     outline.parent?.remove(outline)
 
     if (outline instanceof LineSegments) {
-      outline.geometry.dispose()
+      if (outline.userData.modifyWrapCachedGeometry !== true) {
+        outline.geometry.dispose()
+      }
+
       disposeMaterial(outline.material)
     }
   }
 }
 
-function addOutline(mesh: ModelMesh, selected: boolean) {
+function getOutlineGeometry(
+  mesh: ModelMesh,
+  preparedScene: PreparedModelScene,
+): EdgesGeometry {
+  const cachedGeometry =
+    preparedScene.outlineGeometriesByMeshUuid.get(mesh.uuid)
+
+  if (cachedGeometry) {
+    return cachedGeometry
+  }
+
   const outlineGeometry = new EdgesGeometry(
     mesh.geometry,
     OUTLINE_EDGE_THRESHOLD_DEGREES,
   )
+
+  preparedScene.outlineGeometriesByMeshUuid.set(mesh.uuid, outlineGeometry)
+
+  return outlineGeometry
+}
+
+function addOutline(
+  mesh: ModelMesh,
+  selected: boolean,
+  preparedScene: PreparedModelScene,
+) {
+  const outlineGeometry = getOutlineGeometry(mesh, preparedScene)
   const outlineMaterial = new LineBasicMaterial({
     color: selected ? SELECTED_OUTLINE_COLOR : HOVER_OUTLINE_COLOR,
     depthTest: true,
@@ -1038,29 +1138,26 @@ function addOutline(mesh: ModelMesh, selected: boolean) {
   outline.renderOrder = selected ? 12 : 11
   outline.scale.setScalar(selected ? 1.003 : 1.002)
   outline.userData.modifyWrapOutline = true
+  outline.userData.modifyWrapCachedGeometry = true
   outline.raycast = () => undefined
   mesh.add(outline)
 }
 
 function applyOutlines(
-  scene: Object3D,
+  preparedScene: PreparedModelScene,
   selectedMeshNames: Set<string>,
   hoveredMeshNames: Set<string>,
 ) {
-  removeExistingOutlines(scene)
+  removeExistingOutlines(preparedScene.scene)
 
-  scene.traverse((object) => {
-    if (!isModelMesh(object) || isOutlineObject(object)) {
-      return
-    }
-
-    const selected = selectedMeshNames.has(object.name)
-    const hovered = hoveredMeshNames.has(object.name)
+  for (const mesh of preparedScene.selectableMeshes) {
+    const selected = selectedMeshNames.has(mesh.name)
+    const hovered = hoveredMeshNames.has(mesh.name)
 
     if (selected || hovered) {
-      addOutline(object, selected)
+      addOutline(mesh, selected, preparedScene)
     }
-  })
+  }
 }
 
 function getInventory(scene: Object3D): ModelInventoryRow[] {
@@ -1381,11 +1478,7 @@ function applyWrapMaterials(
   const ceramicPreviewTargetIds = new Set(ceramicPreview?.targetIds ?? [])
   const ppfPreviewTargetIds = new Set(ppfPreview?.targetIds ?? [])
 
-  preparedScene.scene.traverse((object) => {
-    if (!isModelMesh(object) || !wrapCapableMeshNames.has(object.name)) {
-      return
-    }
-
+  for (const object of preparedScene.wrapCapableMeshes) {
     resetMeshMaterialToFactory(object, preparedScene)
 
     const wrap = getEffectiveWrapForMesh(
@@ -1399,13 +1492,13 @@ function applyWrapMaterials(
     }
 
     if (!ceramicMeshNames.has(object.name)) {
-      return
+      continue
     }
 
     const part = getSelectablePartByMeshName(object.name)
 
     if (!part) {
-      return
+      continue
     }
 
     const ceramic = getEffectiveCeramicForTarget(
@@ -1424,7 +1517,7 @@ function applyWrapMaterials(
     if (ceramic?.enabled && !ppf) {
       applyCeramicToMesh(object)
     }
-  })
+  }
 }
 
 function clampTintVlt(vlt: number): number {
@@ -1520,11 +1613,7 @@ function applyTintMaterials(
 ) {
   const previewTargetIds = new Set(tintPreview?.targetIds ?? [])
 
-  preparedScene.scene.traverse((object) => {
-    if (!isModelMesh(object) || !tintableMeshNames.has(object.name)) {
-      return
-    }
-
+  for (const object of preparedScene.tintableMeshes) {
     resetMeshMaterialToFactory(object, preparedScene)
 
     const tint = getEffectiveTintForMesh(
@@ -1537,7 +1626,7 @@ function applyTintMaterials(
     if (tint) {
       applyTintToMesh(object, tint)
     }
-  })
+  }
 }
 
 function clampLightTintDarkness(darkness: number): number {
@@ -1640,11 +1729,7 @@ function applyLightTintMaterials(
 ) {
   const previewTargetIds = new Set(lightTintPreview?.targetIds ?? [])
 
-  preparedScene.scene.traverse((object) => {
-    if (!isModelMesh(object) || !lightTintMeshNames.has(object.name)) {
-      return
-    }
-
+  for (const object of preparedScene.lightTintMeshes) {
     resetMeshMaterialToFactory(object, preparedScene)
 
     const lightTint = getEffectiveLightTintForMesh(
@@ -1657,7 +1742,7 @@ function applyLightTintMaterials(
     if (lightTint) {
       applyLightTintToMesh(object, lightTint)
     }
-  })
+  }
 }
 
 function applyChromeDeleteToMaterial(
@@ -1730,11 +1815,7 @@ function applyChromeDeleteMaterials(
 ) {
   const previewTargetIds = new Set(chromeDeletePreview?.targetIds ?? [])
 
-  preparedScene.scene.traverse((object) => {
-    if (!isModelMesh(object) || !chromeDeleteMeshNames.has(object.name)) {
-      return
-    }
-
+  for (const object of preparedScene.chromeDeleteMeshes) {
     resetMeshMaterialToFactory(object, preparedScene)
 
     const chromeDelete = getEffectiveChromeDeleteForMesh(
@@ -1747,7 +1828,7 @@ function applyChromeDeleteMaterials(
     if (chromeDelete) {
       applyChromeDeleteToMesh(object, chromeDelete)
     }
-  })
+  }
 }
 
 function applyCaliperPaintToMaterial(
@@ -1820,11 +1901,7 @@ function applyCaliperPaintMaterials(
 ) {
   const previewTargetIds = new Set(caliperPaintPreview?.targetIds ?? [])
 
-  preparedScene.scene.traverse((object) => {
-    if (!isModelMesh(object) || !caliperPaintMeshNames.has(object.name)) {
-      return
-    }
-
+  for (const object of preparedScene.caliperPaintMeshes) {
     resetMeshMaterialToFactory(object, preparedScene)
 
     const caliperPaint = getEffectiveCaliperPaintForMesh(
@@ -1837,7 +1914,7 @@ function applyCaliperPaintMaterials(
     if (caliperPaint) {
       applyCaliperPaintToMesh(object, caliperPaint)
     }
-  })
+  }
 }
 
 function applyPowderCoatToMaterial(
@@ -1910,11 +1987,7 @@ function applyPowderCoatMaterials(
 ) {
   const previewTargetIds = new Set(powderCoatPreview?.targetIds ?? [])
 
-  preparedScene.scene.traverse((object) => {
-    if (!isModelMesh(object) || !powderCoatMeshNames.has(object.name)) {
-      return
-    }
-
+  for (const object of preparedScene.powderCoatMeshes) {
     resetMeshMaterialToFactory(object, preparedScene)
 
     const powderCoat = getEffectivePowderCoatForMesh(
@@ -1927,7 +2000,7 @@ function applyPowderCoatMaterials(
     if (powderCoat) {
       applyPowderCoatToMesh(object, powderCoat)
     }
-  })
+  }
 }
 
 function resolveSelectablePart(object: Object3D): VehiclePartDefinition | null {
@@ -3319,6 +3392,24 @@ export function S4Model({
   )
 
   useEffect(() => {
+    return () => {
+      disposePreparedModelScene(preparedScene)
+    }
+  }, [preparedScene])
+
+  useEffect(() => {
+    return () => {
+      preparedNativePlateTexture.dispose()
+    }
+  }, [preparedNativePlateTexture])
+
+  useEffect(() => {
+    return () => {
+      preparedSurfacePlateTexture.dispose()
+    }
+  }, [preparedSurfacePlateTexture])
+
+  useEffect(() => {
     artworkPreviewRef.current = artworkPreview
     freeArtworkPreviewRef.current = freeArtworkPreview
     selectedTargetIdRef.current = selectedTargetId
@@ -3415,12 +3506,12 @@ export function S4Model({
   }, [appliedDesign, powderCoatPreview, preparedScene])
 
   useEffect(() => {
-    applyOutlines(modelScene, selectedMeshNames, hoveredMeshNames)
+    applyOutlines(preparedScene, selectedMeshNames, hoveredMeshNames)
 
     return () => {
       removeExistingOutlines(modelScene)
     }
-  }, [hoveredMeshNames, modelScene, selectedMeshNames])
+  }, [hoveredMeshNames, modelScene, preparedScene, selectedMeshNames])
 
   useEffect(() => {
     const artwork = artworkPreview?.artwork
@@ -3514,6 +3605,26 @@ export function S4Model({
       }
     }
 
+    function trySetPointerCapture(event: PointerEvent) {
+      try {
+        if (!canvas.hasPointerCapture(event.pointerId)) {
+          canvas.setPointerCapture(event.pointerId)
+        }
+      } catch {
+        // Pointer capture can be unavailable for interrupted synthetic gestures.
+      }
+    }
+
+    function tryReleasePointerCapture(event: PointerEvent) {
+      try {
+        if (canvas.hasPointerCapture(event.pointerId)) {
+          canvas.releasePointerCapture(event.pointerId)
+        }
+      } catch {
+        // Ignore stale capture ownership during HMR or canceled gestures.
+      }
+    }
+
     function cancelArtworkDragFrame(drag: ArtworkDragState) {
       if (drag.animationFrameId !== null) {
         window.cancelAnimationFrame(drag.animationFrameId)
@@ -3541,8 +3652,8 @@ export function S4Model({
 
       cancelArtworkDragFrame(drag)
 
-      if (event && canvas.hasPointerCapture(event.pointerId)) {
-        canvas.releasePointerCapture(event.pointerId)
+      if (event) {
+        tryReleasePointerCapture(event)
       }
 
       artworkDragRef.current = null
@@ -3558,8 +3669,8 @@ export function S4Model({
 
       cancelFreeArtworkDragFrame(drag)
 
-      if (event && canvas.hasPointerCapture(event.pointerId)) {
-        canvas.releasePointerCapture(event.pointerId)
+      if (event) {
+        tryReleasePointerCapture(event)
       }
 
       freeArtworkDragRef.current = null
@@ -3789,7 +3900,7 @@ export function S4Model({
           }
           pointerStartRef.current = null
           setControlsEnabled(false)
-          canvas.setPointerCapture(event.pointerId)
+          trySetPointerCapture(event)
           onFreeArtworkTransformChangeRef.current(
             activeFreeArtwork.id,
             freeArtworkTransform,
@@ -3810,7 +3921,7 @@ export function S4Model({
         }
         pointerStartRef.current = null
         setControlsEnabled(false)
-        canvas.setPointerCapture(event.pointerId)
+        trySetPointerCapture(event)
         onArtworkPreviewTransformChangeRef.current(artworkTransform)
         event.preventDefault()
         return
