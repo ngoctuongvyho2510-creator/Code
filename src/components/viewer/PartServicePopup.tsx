@@ -74,6 +74,7 @@ const supportedArtworkMimeTypes = new Set([
   'image/jpeg',
   'image/webp',
 ])
+const artworkWorkingImageMaxDimension = 2048
 const lowResolutionShortEdgeThreshold = 256
 const lowResolutionLongEdgeThreshold = 600
 
@@ -82,7 +83,66 @@ type ArtworkFileLoadResult = {
   fileName: string
   imageWidth: number
   imageHeight: number
+  originalImageWidth: number
+  originalImageHeight: number
   aspectRatio: number
+}
+
+function getArtworkWorkingDimensions(
+  width: number,
+  height: number,
+): { height: number; width: number } {
+  const maxDimension = Math.max(width, height)
+
+  if (maxDimension <= artworkWorkingImageMaxDimension) {
+    return { width, height }
+  }
+
+  const scale = artworkWorkingImageMaxDimension / maxDimension
+
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  }
+}
+
+function getArtworkWorkingMimeType(fileType: string): 'image/jpeg' | 'image/png' {
+  return fileType === 'image/jpeg' ? 'image/jpeg' : 'image/png'
+}
+
+function createArtworkWorkingImage(
+  image: HTMLImageElement,
+  fileType: string,
+): Pick<ArtworkFileLoadResult, 'imageHeight' | 'imageSource' | 'imageWidth'> {
+  const { width, height } = getArtworkWorkingDimensions(
+    image.naturalWidth,
+    image.naturalHeight,
+  )
+  const canvas = document.createElement('canvas')
+  const context = canvas.getContext('2d')
+
+  if (!context) {
+    throw new Error('Artwork canvas unavailable')
+  }
+
+  canvas.width = width
+  canvas.height = height
+  context.clearRect(0, 0, width, height)
+  context.imageSmoothingEnabled = true
+  context.imageSmoothingQuality = 'high'
+  context.drawImage(image, 0, 0, width, height)
+
+  const mimeType = getArtworkWorkingMimeType(fileType)
+  const imageSource =
+    mimeType === 'image/jpeg'
+      ? canvas.toDataURL(mimeType, 0.92)
+      : canvas.toDataURL(mimeType)
+
+  return {
+    imageSource,
+    imageWidth: width,
+    imageHeight: height,
+  }
 }
 
 type PartServicePopupProps = {
@@ -506,40 +566,47 @@ export function PartServicePopup({
       return
     }
 
-    const reader = new FileReader()
+    const imageUrl = URL.createObjectURL(file)
+    const image = new Image()
 
-    reader.onerror = () => {
+    function failUpload() {
+      URL.revokeObjectURL(imageUrl)
       onError('Upload failed')
     }
 
-    reader.onload = () => {
-      const imageSource = reader.result
+    image.onerror = failUpload
 
-      if (typeof imageSource !== 'string') {
-        onError('Upload failed')
+    image.onload = () => {
+      if (image.naturalWidth <= 0 || image.naturalHeight <= 0) {
+        failUpload()
         return
       }
 
-      const image = new Image()
+      let workingImage: Pick<
+        ArtworkFileLoadResult,
+        'imageHeight' | 'imageSource' | 'imageWidth'
+      >
 
-      image.onerror = () => {
-        onError('Upload failed')
+      try {
+        workingImage = createArtworkWorkingImage(image, file.type)
+      } catch {
+        failUpload()
+        return
       }
 
-      image.onload = () => {
-        onLoad({
-          imageSource,
-          fileName: file.name,
-          imageWidth: image.naturalWidth,
-          imageHeight: image.naturalHeight,
-          aspectRatio: image.naturalWidth / image.naturalHeight,
-        })
-      }
-
-      image.src = imageSource
+      URL.revokeObjectURL(imageUrl)
+      onLoad({
+        imageSource: workingImage.imageSource,
+        fileName: file.name,
+        imageWidth: workingImage.imageWidth,
+        imageHeight: workingImage.imageHeight,
+        originalImageWidth: image.naturalWidth,
+        originalImageHeight: image.naturalHeight,
+        aspectRatio: image.naturalWidth / image.naturalHeight,
+      })
     }
 
-    reader.readAsDataURL(file)
+    image.src = imageUrl
   }
 
   function handleArtworkUpload(fileList: FileList | null) {
@@ -553,8 +620,8 @@ export function PartServicePopup({
           imageHeight: result.imageHeight,
           aspectRatio: result.aspectRatio,
           lowResolution: isLowResolutionArtwork(
-            result.imageWidth,
-            result.imageHeight,
+            result.originalImageWidth,
+            result.originalImageHeight,
           ),
           error: null,
         })
@@ -584,8 +651,8 @@ export function PartServicePopup({
           pendingImageHeight: result.imageHeight,
           pendingAspectRatio: result.aspectRatio,
           lowResolution: isLowResolutionArtwork(
-            result.imageWidth,
-            result.imageHeight,
+            result.originalImageWidth,
+            result.originalImageHeight,
           ),
           error: null,
         })
