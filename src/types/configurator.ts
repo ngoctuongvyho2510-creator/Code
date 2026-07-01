@@ -132,6 +132,19 @@ export type PowderCoatConfig = {
   finish: PowderCoatFinish
 }
 
+export type PpfFinish = 'gloss' | 'matte'
+
+export type PpfScope = 'this' | 'both' | 'this-side' | 'all'
+
+export type PpfScopeOption = {
+  id: PpfScope
+  label: string
+}
+
+export type PpfConfig = {
+  finish: PpfFinish
+}
+
 export type ArtworkMode = 'place' | 'fill'
 
 export type ArtworkVector3 = readonly [number, number, number]
@@ -216,7 +229,7 @@ export type LayeredSurfaceState = {
   caliperPaint: CaliperPaintConfig | null
   powderCoat: PowderCoatConfig | null
   artwork: readonly ArtworkPlacement[]
-  ppf: AppliedServiceState | null
+  ppf: PpfConfig | null
   ceramic: AppliedServiceState | null
   services: Partial<Record<ServiceId, AppliedServiceState>>
 }
@@ -241,6 +254,8 @@ export type DraftSelectionState = {
   caliperPaintScope: CaliperPaintScope | null
   powderCoatConfig: PowderCoatConfig | null
   powderCoatScope: PowderCoatScope | null
+  ppfConfig: PpfConfig | null
+  ppfScope: PpfScope | null
   artworkConfig: ArtworkDraftState | null
   freeArtworkConfig: FreeArtworkDraftState | null
 }
@@ -273,6 +288,12 @@ export type CaliperPaintPreviewState = {
 export type PowderCoatPreviewState = {
   targetIds: readonly SelectionTargetId[]
   powderCoat: PowderCoatConfig
+}
+
+export type PpfPreviewState = {
+  fullBodyBase: boolean
+  targetIds: readonly SelectionTargetId[]
+  ppf: PpfConfig
 }
 
 export type ArtworkPreviewState = {

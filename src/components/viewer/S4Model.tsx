@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState, type RefObject } from 'reac
 import { useGLTF, useTexture } from '@react-three/drei'
 import { useThree } from '@react-three/fiber'
 import {
+  AdditiveBlending,
   Box3,
   BufferGeometry,
   ClampToEdgeWrapping,
@@ -41,6 +42,7 @@ import {
   getSelectionTarget,
   LICENSE_PLATE_MESH_NAMES,
   LIGHT_TINT_MESH_NAMES,
+  PPF_MESH_NAMES,
   POWDER_COAT_MESH_NAMES,
   TINTABLE_GLASS_MESH_NAMES,
   WRAP_CAPABLE_MESH_NAMES,
@@ -62,6 +64,9 @@ import type {
   FreeArtworkPreviewState,
   LightTintConfig,
   LightTintPreviewState,
+  PpfConfig,
+  PpfFinish,
+  PpfPreviewState,
   PowderCoatConfig,
   PowderCoatFinish,
   PowderCoatPreviewState,
@@ -88,6 +93,8 @@ const ARTWORK_RENDER_ORDER = 14
 const ARTWORK_PREVIEW_RENDER_ORDER = 16
 const FREE_ARTWORK_RENDER_ORDER = 14.2
 const FREE_ARTWORK_PREVIEW_RENDER_ORDER = 16.2
+const PPF_RENDER_ORDER = 18
+const PPF_PREVIEW_RENDER_ORDER = 18.4
 const WORLD_UP = new Vector3(0, 1, 0)
 const PROJECTOR_AXIS = new Vector3(0, 0, 1)
 
@@ -153,6 +160,11 @@ type FreeArtworkTargetCache = {
   meshes: ModelMesh[]
 }
 
+type PpfTargetEntry = {
+  mesh: ModelMesh
+  partId: string
+}
+
 type S4ModelProps = {
   appliedDesign: AppliedDesignState
   artworkPreview: ArtworkPreviewState | null
@@ -161,6 +173,7 @@ type S4ModelProps = {
   chromeDeletePreview: ChromeDeletePreviewState | null
   freeArtworkPreview: FreeArtworkPreviewState | null
   lightTintPreview: LightTintPreviewState | null
+  ppfPreview: PpfPreviewState | null
   powderCoatPreview: PowderCoatPreviewState | null
   selectedTargetId: string | null
   tintPreview: TintPreviewState | null
@@ -186,6 +199,7 @@ const artworkMeshNames = new Set<string>(ARTWORK_MESH_NAMES)
 const caliperPaintMeshNames = new Set<string>(CALIPER_PAINT_MESH_NAMES)
 const chromeDeleteMeshNames = new Set<string>(CHROME_DELETE_MESH_NAMES)
 const lightTintMeshNames = new Set<string>(LIGHT_TINT_MESH_NAMES)
+const ppfMeshNames = new Set<string>(PPF_MESH_NAMES)
 const powderCoatMeshNames = new Set<string>(POWDER_COAT_MESH_NAMES)
 const tintableMeshNames = new Set<string>(TINTABLE_GLASS_MESH_NAMES)
 const fullBodyMeshNames = new Set<string>(FULL_BODY_MESH_NAMES)
@@ -383,6 +397,38 @@ const powderCoatFinishSettings = {
     metalness: number
     reflectivity: number
     roughness: number
+  }
+>
+
+const ppfFinishSettings = {
+  gloss: {
+    clearcoat: 1,
+    clearcoatRoughness: 0.035,
+    envMapIntensity: 0.34,
+    opacity: 0.026,
+    reflectivity: 0.42,
+    roughness: 0.04,
+    specularIntensity: 0.22,
+  },
+  matte: {
+    clearcoat: 0.16,
+    clearcoatRoughness: 0.82,
+    envMapIntensity: 0.18,
+    opacity: 0.018,
+    reflectivity: 0.14,
+    roughness: 0.88,
+    specularIntensity: 0.08,
+  },
+} as const satisfies Record<
+  PpfFinish,
+  {
+    clearcoat: number
+    clearcoatRoughness: number
+    envMapIntensity: number
+    opacity: number
+    reflectivity: number
+    roughness: number
+    specularIntensity: number
   }
 >
 
@@ -1938,6 +1984,29 @@ function getFreeArtworkTargetCache(scene: Object3D): FreeArtworkTargetCache {
   }
 }
 
+function getPpfTargetEntries(scene: Object3D): PpfTargetEntry[] {
+  const entries: PpfTargetEntry[] = []
+
+  scene.traverse((object) => {
+    if (!isModelMesh(object) || !ppfMeshNames.has(object.name)) {
+      return
+    }
+
+    const part = getSelectablePartByMeshName(object.name)
+
+    if (!part?.fullBody || !part.services.includes('ppf')) {
+      return
+    }
+
+    entries.push({
+      mesh: object,
+      partId: part.id,
+    })
+  })
+
+  return entries
+}
+
 function getLargestArtworkMesh(meshes: readonly ModelMesh[]): ModelMesh | null {
   let largestMesh: ModelMesh | null = null
   let largestVolume = 0
@@ -2789,6 +2858,179 @@ function FreeArtworkOverlays({
   )
 }
 
+function getEffectivePpfForTarget(
+  partId: string,
+  appliedDesign: AppliedDesignState,
+  ppfPreview: PpfPreviewState | null,
+  previewTargetIds: Set<string>,
+): { ppf: PpfConfig; preview: boolean } | null {
+  if (ppfPreview && !ppfPreview.fullBodyBase && previewTargetIds.has(partId)) {
+    return {
+      ppf: ppfPreview.ppf,
+      preview: true,
+    }
+  }
+
+  const partPpf = appliedDesign.parts[partId]?.ppf ?? null
+
+  if (partPpf) {
+    return {
+      ppf: partPpf,
+      preview: false,
+    }
+  }
+
+  if (ppfPreview?.fullBodyBase) {
+    return {
+      ppf: ppfPreview.ppf,
+      preview: true,
+    }
+  }
+
+  const fullBodyPpf = appliedDesign.fullBody.ppf
+
+  return fullBodyPpf
+    ? {
+        ppf: fullBodyPpf,
+        preview: false,
+      }
+    : null
+}
+
+function createPpfMaterial(ppf: PpfConfig): MeshPhysicalMaterial {
+  const settings = ppfFinishSettings[ppf.finish]
+  const material = new MeshPhysicalMaterial({
+    blending: AdditiveBlending,
+    color: '#000000',
+    depthTest: true,
+    depthWrite: false,
+    envMapIntensity: settings.envMapIntensity,
+    metalness: 0,
+    opacity: settings.opacity,
+    polygonOffset: true,
+    polygonOffsetFactor: -4,
+    polygonOffsetUnits: -4,
+    roughness: settings.roughness,
+    side: FrontSide,
+    toneMapped: false,
+    transparent: true,
+  })
+
+  material.name = `ModifyWrap ${ppf.finish} PPF Overlay`
+  material.alphaHash = false
+  material.alphaTest = 0
+  material.clearcoat = settings.clearcoat
+  material.clearcoatRoughness = settings.clearcoatRoughness
+  material.ior = 1.46
+  material.premultipliedAlpha = false
+  material.reflectivity = settings.reflectivity
+  material.specularColor = new Color('#ffffff')
+  material.specularIntensity = settings.specularIntensity
+  material.transmission = 0
+  material.thickness = 0
+  material.needsUpdate = true
+
+  return material
+}
+
+type PpfOverlayProps = {
+  finish: PpfFinish
+  mesh: ModelMesh
+  partId: string
+  preview: boolean
+}
+
+const PpfOverlay = memo(function PpfOverlay({
+  finish,
+  mesh,
+  partId,
+  preview,
+}: PpfOverlayProps) {
+  const overlay = useMemo(() => {
+    mesh.updateWorldMatrix(true, false)
+
+    const ppf: PpfConfig = { finish }
+    const overlayMesh = new Mesh(mesh.geometry.clone(), createPpfMaterial(ppf))
+
+    overlayMesh.name = preview
+      ? `MW_PPF_PREVIEW_${partId}_${mesh.name}`
+      : `MW_PPF_${partId}_${mesh.name}`
+    overlayMesh.matrix.copy(mesh.matrixWorld)
+    overlayMesh.matrixAutoUpdate = false
+    overlayMesh.frustumCulled = false
+    overlayMesh.renderOrder = preview ? PPF_PREVIEW_RENDER_ORDER : PPF_RENDER_ORDER
+    overlayMesh.userData.modifyWrapPpf = true
+    overlayMesh.userData.ppfPartId = partId
+    overlayMesh.userData.sourceMeshName = mesh.name
+    overlayMesh.raycast = () => undefined
+
+    return overlayMesh
+  }, [finish, mesh, partId, preview])
+
+  useEffect(() => {
+    return () => {
+      overlay.geometry.dispose()
+      disposeMaterial(overlay.material)
+    }
+  }, [overlay])
+
+  return <primitive object={overlay} />
+})
+
+type PpfOverlaysProps = {
+  appliedDesign: AppliedDesignState
+  ppfPreview: PpfPreviewState | null
+  targetEntries: readonly PpfTargetEntry[]
+}
+
+function PpfOverlays({
+  appliedDesign,
+  ppfPreview,
+  targetEntries,
+}: PpfOverlaysProps) {
+  const previewTargetIds = useMemo(
+    () => new Set(ppfPreview?.targetIds ?? []),
+    [ppfPreview],
+  )
+  const items = useMemo(
+    () =>
+      targetEntries.flatMap((target) => {
+        const effectivePpf = getEffectivePpfForTarget(
+          target.partId,
+          appliedDesign,
+          ppfPreview,
+          previewTargetIds,
+        )
+
+        return effectivePpf
+          ? [
+              {
+                finish: effectivePpf.ppf.finish,
+                mesh: target.mesh,
+                partId: target.partId,
+                preview: effectivePpf.preview,
+              },
+            ]
+          : []
+      }),
+    [appliedDesign, ppfPreview, previewTargetIds, targetEntries],
+  )
+
+  return (
+    <>
+      {items.map((item) => (
+        <PpfOverlay
+          finish={item.finish}
+          key={`${item.partId}-${item.mesh.uuid}`}
+          mesh={item.mesh}
+          partId={item.partId}
+          preview={item.preview}
+        />
+      ))}
+    </>
+  )
+}
+
 export function S4Model({
   appliedDesign,
   artworkPreview,
@@ -2797,6 +3039,7 @@ export function S4Model({
   controlsRef,
   freeArtworkPreview,
   lightTintPreview,
+  ppfPreview,
   powderCoatPreview,
   selectedTargetId,
   tintPreview,
@@ -2859,6 +3102,10 @@ export function S4Model({
   const modelScene = preparedScene.scene
   const freeArtworkTargetCache = useMemo(
     () => getFreeArtworkTargetCache(modelScene),
+    [modelScene],
+  )
+  const ppfTargetEntries = useMemo(
+    () => getPpfTargetEntries(modelScene),
     [modelScene],
   )
 
@@ -3569,6 +3816,11 @@ export function S4Model({
         appliedDesign={appliedDesign}
         freeArtworkPreview={freeArtworkPreview}
         targetCache={freeArtworkTargetCache}
+      />
+      <PpfOverlays
+        appliedDesign={appliedDesign}
+        ppfPreview={ppfPreview}
+        targetEntries={ppfTargetEntries}
       />
     </>
   )

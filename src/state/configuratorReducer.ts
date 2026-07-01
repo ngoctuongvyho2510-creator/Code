@@ -4,13 +4,16 @@ import {
   getDefaultCaliperPaintScope,
   getDefaultChromeDeleteScope,
   getDefaultLightTintScope,
+  getDefaultPpfScope,
   getDefaultPowderCoatScope,
   getDefaultTintScope,
   getSelectionTarget,
   isArtworkTarget,
+  isPpfTarget,
   resolveCaliperPaintScopeTargetIds,
   resolveChromeDeleteScopeTargetIds,
   resolveLightTintScopeTargetIds,
+  resolvePpfScopeTargetIds,
   resolvePowderCoatScopeTargetIds,
   resolveTintScopeTargetIds,
 } from '../config/vehicleParts'
@@ -33,6 +36,9 @@ import type {
   LayeredSurfaceState,
   LightTintConfig,
   LightTintScope,
+  PpfConfig,
+  PpfFinish,
+  PpfScope,
   PowderCoatConfig,
   PowderCoatFinish,
   PowderCoatScope,
@@ -70,6 +76,10 @@ const DEFAULT_CALIPER_PAINT_CONFIG: CaliperPaintConfig = {
 const DEFAULT_POWDER_COAT_CONFIG: PowderCoatConfig = {
   color: '#2d3135',
   finish: 'satin',
+}
+
+const DEFAULT_PPF_CONFIG: PpfConfig = {
+  finish: 'gloss',
 }
 
 const DEFAULT_ARTWORK_PLACE_SIZE = 0.68
@@ -140,6 +150,14 @@ export type ConfiguratorAction =
       scope: PowderCoatScope
     }
   | {
+      type: 'update-ppf-draft'
+      patch: Partial<PpfConfig>
+    }
+  | {
+      type: 'update-ppf-scope'
+      scope: PpfScope
+    }
+  | {
       type: 'update-artwork-draft'
       patch: Partial<ArtworkDraftState>
     }
@@ -183,6 +201,9 @@ export type ConfiguratorAction =
       type: 'apply-wrap-all'
     }
   | {
+      type: 'apply-ppf-all'
+    }
+  | {
       type: 'reset-wrap'
       targetId: SelectionTargetId
     }
@@ -212,6 +233,10 @@ export type ConfiguratorAction =
       scope: PowderCoatScope
     }
   | {
+      type: 'reset-ppf'
+      targetId: SelectionTargetId
+    }
+  | {
       type: 'remove-artwork'
       targetId: SelectionTargetId
       artworkId: string
@@ -222,6 +247,9 @@ export type ConfiguratorAction =
     }
   | {
       type: 'reset-all-wraps'
+    }
+  | {
+      type: 'reset-all-ppf'
     }
 
 function createLayeredSurfaceState(): LayeredSurfaceState {
@@ -283,7 +311,7 @@ function applyServiceToSurface(
   if (serviceId === 'ppf') {
     return {
       ...surfaceState,
-      ppf: appliedService,
+      ppf: DEFAULT_PPF_CONFIG,
     }
   }
 
@@ -414,6 +442,25 @@ function clearPowderCoatFromSurface(
   return {
     ...surfaceState,
     powderCoat: null,
+  }
+}
+
+function setPpfOnSurface(
+  surfaceState: LayeredSurfaceState,
+  ppfConfig: PpfConfig,
+): LayeredSurfaceState {
+  return {
+    ...surfaceState,
+    ppf: ppfConfig,
+  }
+}
+
+function clearPpfFromSurface(
+  surfaceState: LayeredSurfaceState,
+): LayeredSurfaceState {
+  return {
+    ...surfaceState,
+    ppf: null,
   }
 }
 
@@ -557,6 +604,39 @@ function createPowderCoatDraft(
   )
 }
 
+function getAppliedPpfForTarget(
+  appliedDesign: AppliedDesignState,
+  targetId: SelectionTargetId,
+): PpfConfig | null {
+  if (targetId === FULL_BODY_TARGET_ID) {
+    return appliedDesign.fullBody.ppf
+  }
+
+  const target = getSelectionTarget(targetId)
+  const partPpf = appliedDesign.parts[targetId]?.ppf ?? null
+
+  if (partPpf) {
+    return partPpf
+  }
+
+  if (target?.fullBody) {
+    return appliedDesign.fullBody.ppf
+  }
+
+  return null
+}
+
+function createPpfDraft(
+  appliedDesign: AppliedDesignState,
+  targetId: SelectionTargetId,
+): PpfConfig | null {
+  if (!isPpfTarget(targetId)) {
+    return null
+  }
+
+  return getAppliedPpfForTarget(appliedDesign, targetId) ?? DEFAULT_PPF_CONFIG
+}
+
 function createArtworkId(): string {
   artworkIdCounter += 1
   return `artwork-${Date.now()}-${artworkIdCounter}`
@@ -673,6 +753,17 @@ function updatePowderCoatDraft(
   }
 }
 
+function updatePpfDraft(
+  currentPpf: PpfConfig,
+  patch: Partial<PpfConfig>,
+): PpfConfig {
+  const finish = patch.finish
+
+  return {
+    finish: isPpfFinish(finish) ? finish : currentPpf.finish,
+  }
+}
+
 function updateArtworkDraft(
   currentArtwork: ArtworkDraftState,
   patch: Partial<ArtworkDraftState>,
@@ -748,6 +839,10 @@ function isPowderCoatFinish(
   finish: PowderCoatFinish | undefined,
 ): finish is PowderCoatFinish {
   return finish === 'gloss' || finish === 'satin' || finish === 'matte'
+}
+
+function isPpfFinish(finish: PpfFinish | undefined): finish is PpfFinish {
+  return finish === 'gloss' || finish === 'matte'
 }
 
 function clampTintVlt(vlt: number): number {
@@ -1289,6 +1384,47 @@ function clearPowderCoatForTargetIds(
   return nextParts
 }
 
+function setPpfForTargetIds(
+  parts: AppliedDesignState['parts'],
+  targetIds: readonly SelectionTargetId[],
+  ppfConfig: PpfConfig,
+): AppliedDesignState['parts'] {
+  const nextParts: AppliedDesignState['parts'] = {
+    ...parts,
+  }
+
+  for (const targetId of targetIds) {
+    const currentPartState = nextParts[targetId] ?? createLayeredSurfaceState()
+
+    nextParts[targetId] = setPpfOnSurface(currentPartState, ppfConfig)
+  }
+
+  return nextParts
+}
+
+function clearPpfForTargetIds(
+  parts: AppliedDesignState['parts'],
+  targetIds: readonly SelectionTargetId[],
+): AppliedDesignState['parts'] {
+  const nextParts: AppliedDesignState['parts'] = {
+    ...parts,
+  }
+
+  for (const targetId of targetIds) {
+    const currentPartState = nextParts[targetId] ?? createLayeredSurfaceState()
+
+    nextParts[targetId] = clearPpfFromSurface(currentPartState)
+  }
+
+  return nextParts
+}
+
+function clearFullBodyPartPpf(
+  parts: AppliedDesignState['parts'],
+): AppliedDesignState['parts'] {
+  return clearPpfForTargetIds(parts, FULL_BODY_PART_IDS)
+}
+
 export const initialConfiguratorState: ConfiguratorState = {
   appliedDesign: {
     fullBody: createLayeredSurfaceState(),
@@ -1325,6 +1461,8 @@ export function configuratorReducer(
         caliperPaintScope: null,
         powderCoatConfig: null,
         powderCoatScope: null,
+        ppfConfig: null,
+        ppfScope: null,
         artworkConfig: null,
         freeArtworkConfig: null,
       },
@@ -1392,6 +1530,16 @@ export function configuratorReducer(
             state.draftSelection.targetId,
           )
         : null
+    const defaultPpfScope =
+      action.serviceId === 'ppf' &&
+      state.draftSelection.targetId !== FULL_BODY_TARGET_ID
+        ? getDefaultPpfScope(state.draftSelection.targetId)
+        : null
+    const ppfConfig =
+      action.serviceId === 'ppf' &&
+      (state.draftSelection.targetId === FULL_BODY_TARGET_ID || defaultPpfScope)
+        ? createPpfDraft(state.appliedDesign, state.draftSelection.targetId)
+        : null
     const artworkConfig =
       action.serviceId === 'artwork'
         ? createArtworkDraft(
@@ -1413,6 +1561,10 @@ export function configuratorReducer(
       return state
     }
 
+    if (action.serviceId === 'ppf' && !ppfConfig) {
+      return state
+    }
+
     return {
       ...state,
       draftSelection: {
@@ -1429,6 +1581,8 @@ export function configuratorReducer(
         caliperPaintScope: defaultCaliperPaintScope,
         powderCoatConfig,
         powderCoatScope: defaultPowderCoatScope,
+        ppfConfig,
+        ppfScope: defaultPpfScope,
         artworkConfig,
         freeArtworkConfig,
       },
@@ -1692,6 +1846,58 @@ export function configuratorReducer(
     }
   }
 
+  if (action.type === 'update-ppf-draft') {
+    const draftSelection = state.draftSelection
+
+    if (draftSelection?.serviceId !== 'ppf') {
+      return state
+    }
+
+    const currentPpf =
+      draftSelection.ppfConfig ??
+      createPpfDraft(state.appliedDesign, draftSelection.targetId)
+
+    if (!currentPpf) {
+      return state
+    }
+
+    return {
+      ...state,
+      draftSelection: {
+        ...draftSelection,
+        ppfConfig: updatePpfDraft(currentPpf, action.patch),
+      },
+    }
+  }
+
+  if (action.type === 'update-ppf-scope') {
+    const draftSelection = state.draftSelection
+
+    if (
+      draftSelection?.serviceId !== 'ppf' ||
+      draftSelection.targetId === FULL_BODY_TARGET_ID
+    ) {
+      return state
+    }
+
+    if (
+      resolvePpfScopeTargetIds(
+        draftSelection.targetId,
+        action.scope,
+      ).length === 0
+    ) {
+      return state
+    }
+
+    return {
+      ...state,
+      draftSelection: {
+        ...draftSelection,
+        ppfScope: action.scope,
+      },
+    }
+  }
+
   if (action.type === 'update-artwork-draft') {
     const draftSelection = state.draftSelection
 
@@ -1890,6 +2096,8 @@ export function configuratorReducer(
         caliperPaintScope: null,
         powderCoatConfig: null,
         powderCoatScope: null,
+        ppfConfig: null,
+        ppfScope: null,
         artworkConfig: null,
         freeArtworkConfig: null,
       },
@@ -2141,6 +2349,52 @@ export function configuratorReducer(
       }
     }
 
+    if (draftSelection.serviceId === 'ppf') {
+      if (!draftSelection.ppfConfig || !isPpfTarget(draftSelection.targetId)) {
+        return state
+      }
+
+      if (draftSelection.targetId === FULL_BODY_TARGET_ID) {
+        return {
+          ...state,
+          appliedDesign: {
+            ...state.appliedDesign,
+            fullBody: setPpfOnSurface(
+              state.appliedDesign.fullBody,
+              draftSelection.ppfConfig,
+            ),
+          },
+          draftSelection: null,
+        }
+      }
+
+      if (!draftSelection.ppfScope) {
+        return state
+      }
+
+      const ppfTargetIds = resolvePpfScopeTargetIds(
+        draftSelection.targetId,
+        draftSelection.ppfScope,
+      )
+
+      if (ppfTargetIds.length === 0) {
+        return state
+      }
+
+      return {
+        ...state,
+        appliedDesign: {
+          ...state.appliedDesign,
+          parts: setPpfForTargetIds(
+            state.appliedDesign.parts,
+            ppfTargetIds,
+            draftSelection.ppfConfig,
+          ),
+        },
+        draftSelection: null,
+      }
+    }
+
     if (draftSelection.targetId === FULL_BODY_TARGET_ID) {
       return {
         ...state,
@@ -2195,6 +2449,31 @@ export function configuratorReducer(
           draftSelection.wrapConfig,
         ),
         parts: clearFullBodyPartWraps(state.appliedDesign.parts),
+      },
+      draftSelection: null,
+    }
+  }
+
+  if (action.type === 'apply-ppf-all') {
+    const draftSelection = state.draftSelection
+
+    if (
+      draftSelection?.targetId !== FULL_BODY_TARGET_ID ||
+      draftSelection.serviceId !== 'ppf' ||
+      !draftSelection.ppfConfig
+    ) {
+      return state
+    }
+
+    return {
+      ...state,
+      appliedDesign: {
+        ...state.appliedDesign,
+        fullBody: setPpfOnSurface(
+          state.appliedDesign.fullBody,
+          draftSelection.ppfConfig,
+        ),
+        parts: clearFullBodyPartPpf(state.appliedDesign.parts),
       },
       draftSelection: null,
     }
@@ -2340,6 +2619,38 @@ export function configuratorReducer(
     }
   }
 
+  if (action.type === 'reset-ppf') {
+    if (!isPpfTarget(action.targetId)) {
+      return state
+    }
+
+    if (action.targetId === FULL_BODY_TARGET_ID) {
+      return {
+        ...state,
+        appliedDesign: {
+          ...state.appliedDesign,
+          fullBody: clearPpfFromSurface(state.appliedDesign.fullBody),
+        },
+        draftSelection: null,
+      }
+    }
+
+    const currentPartState =
+      state.appliedDesign.parts[action.targetId] ?? createLayeredSurfaceState()
+
+    return {
+      ...state,
+      appliedDesign: {
+        ...state.appliedDesign,
+        parts: {
+          ...state.appliedDesign.parts,
+          [action.targetId]: clearPpfFromSurface(currentPartState),
+        },
+      },
+      draftSelection: null,
+    }
+  }
+
   if (action.type === 'remove-artwork') {
     if (!isArtworkTarget(action.targetId)) {
       return state
@@ -2392,6 +2703,18 @@ export function configuratorReducer(
         ...state.appliedDesign,
         fullBody: clearWrapFromSurface(state.appliedDesign.fullBody),
         parts: clearFullBodyPartWraps(state.appliedDesign.parts),
+      },
+      draftSelection: null,
+    }
+  }
+
+  if (action.type === 'reset-all-ppf') {
+    return {
+      ...state,
+      appliedDesign: {
+        ...state.appliedDesign,
+        fullBody: clearPpfFromSurface(state.appliedDesign.fullBody),
+        parts: clearFullBodyPartPpf(state.appliedDesign.parts),
       },
       draftSelection: null,
     }
