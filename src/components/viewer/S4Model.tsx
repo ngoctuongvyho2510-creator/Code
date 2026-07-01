@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { useGLTF, useTexture } from '@react-three/drei'
 import { useThree } from '@react-three/fiber'
 import {
@@ -12,6 +12,7 @@ import {
   LineBasicMaterial,
   LineSegments,
   Material,
+  Matrix4,
   Mesh,
   MeshPhysicalMaterial,
   MeshStandardMaterial,
@@ -127,12 +128,29 @@ type PointerStart = {
 }
 
 type ArtworkDragState = {
+  animationFrameId: number | null
+  lastTransform: Partial<ArtworkDraftState> | null
+  latestEvent: PointerEvent | null
   pointerId: number
 }
 
 type FreeArtworkDragState = {
+  animationFrameId: number | null
   artworkId: string
+  lastTransform: Partial<FreeArtworkItem> | null
+  latestEvent: PointerEvent | null
   pointerId: number
+}
+
+type FreeArtworkTargetEntry = {
+  mesh: ModelMesh
+  worldBounds: Box3
+}
+
+type FreeArtworkTargetCache = {
+  bounds: Box3 | null
+  entries: FreeArtworkTargetEntry[]
+  meshes: ModelMesh[]
 }
 
 type S4ModelProps = {
@@ -1895,30 +1913,29 @@ function getArtworkTargetMeshes(
   return targetMeshes
 }
 
-function getFreeArtworkTargetMeshes(scene: Object3D): ModelMesh[] {
-  const targetMeshes: ModelMesh[] = []
+function getFreeArtworkTargetCache(scene: Object3D): FreeArtworkTargetCache {
+  const entries: FreeArtworkTargetEntry[] = []
+  const bounds = new Box3()
 
   scene.traverse((object) => {
     if (isModelMesh(object) && fullBodyMeshNames.has(object.name)) {
-      targetMeshes.push(object)
+      object.updateWorldMatrix(true, false)
+
+      const worldBounds = new Box3().setFromObject(object)
+
+      entries.push({
+        mesh: object,
+        worldBounds,
+      })
+      bounds.union(worldBounds)
     }
   })
 
-  return targetMeshes
-}
-
-function getFreeArtworkTargetBounds(meshes: readonly ModelMesh[]): Box3 | null {
-  if (meshes.length === 0) {
-    return null
+  return {
+    bounds: entries.length > 0 ? bounds : null,
+    entries,
+    meshes: entries.map((entry) => entry.mesh),
   }
-
-  const bounds = new Box3()
-
-  for (const mesh of meshes) {
-    bounds.expandByObject(mesh)
-  }
-
-  return bounds
 }
 
 function getLargestArtworkMesh(meshes: readonly ModelMesh[]): ModelMesh | null {
@@ -1935,6 +1952,27 @@ function getLargestArtworkMesh(meshes: readonly ModelMesh[]): ModelMesh | null {
 
     if (!largestMesh || volume > largestVolume) {
       largestMesh = mesh
+      largestVolume = volume
+    }
+  }
+
+  return largestMesh
+}
+
+function getLargestFreeArtworkTarget(
+  targetCache: FreeArtworkTargetCache,
+): ModelMesh | null {
+  let largestMesh: ModelMesh | null = null
+  let largestVolume = 0
+  const size = new Vector3()
+
+  for (const entry of targetCache.entries) {
+    entry.worldBounds.getSize(size)
+
+    const volume = Math.max(0, size.x) * Math.max(0, size.y) * Math.max(0, size.z)
+
+    if (!largestMesh || volume > largestVolume) {
+      largestMesh = entry.mesh
       largestVolume = volume
     }
   }
@@ -2066,10 +2104,10 @@ function freeArtworkHasProjector(item: FreeArtworkItem): boolean {
 }
 
 function getDefaultFreeArtworkTransform(
-  meshes: readonly ModelMesh[],
+  targetCache: FreeArtworkTargetCache,
   cameraPosition: Vector3,
 ): Partial<FreeArtworkItem> | null {
-  const bounds = getFreeArtworkTargetBounds(meshes)
+  const bounds = targetCache.bounds
 
   if (!bounds) {
     return null
@@ -2080,13 +2118,13 @@ function getDefaultFreeArtworkTransform(
 
   const direction = center.clone().sub(cameraPosition).normalize()
   const raycaster = new Raycaster(cameraPosition, direction)
-  const intersection = raycaster.intersectObjects([...meshes], false)[0]
+  const intersection = raycaster.intersectObjects(targetCache.meshes, false)[0]
 
   if (intersection) {
     return getFreeArtworkTransformFromIntersection(intersection, cameraPosition)
   }
 
-  const fallbackMesh = getLargestArtworkMesh(meshes)
+  const fallbackMesh = getLargestFreeArtworkTarget(targetCache)
 
   if (!fallbackMesh) {
     return null
@@ -2145,18 +2183,16 @@ function getFreeArtworkTransformFromPointer(
   event: PointerEvent,
   canvas: HTMLCanvasElement,
   camera: Parameters<Raycaster['setFromCamera']>[1],
-  scene: Object3D,
+  targetCache: FreeArtworkTargetCache,
   raycaster: Raycaster,
 ): Partial<FreeArtworkItem> | null {
-  const targetMeshes = getFreeArtworkTargetMeshes(scene)
-
-  if (targetMeshes.length === 0) {
+  if (targetCache.meshes.length === 0) {
     return null
   }
 
   raycaster.setFromCamera(getPointerCoordinates(event, canvas), camera)
 
-  const intersection = raycaster.intersectObjects(targetMeshes, false)[0]
+  const intersection = raycaster.intersectObjects(targetCache.meshes, false)[0]
 
   if (!intersection) {
     return null
@@ -2551,6 +2587,32 @@ function getFreeArtworkProjectionSize(artwork: FreeArtworkItem): Vector3 {
   return new Vector3(width, height, depth)
 }
 
+function getProjectorWorldBounds(
+  position: Vector3,
+  orientation: Euler,
+  size: Vector3,
+): Box3 {
+  const halfSize = size.clone().multiplyScalar(0.5)
+  const matrix = new Matrix4().compose(
+    position,
+    new Quaternion().setFromEuler(orientation),
+    new Vector3(1, 1, 1),
+  )
+  const bounds = new Box3()
+  const corner = new Vector3()
+
+  for (const x of [-halfSize.x, halfSize.x]) {
+    for (const y of [-halfSize.y, halfSize.y]) {
+      for (const z of [-halfSize.z, halfSize.z]) {
+        corner.set(x, y, z).applyMatrix4(matrix)
+        bounds.expandByPoint(corner)
+      }
+    }
+  }
+
+  return bounds
+}
+
 function usePreparedFreeArtworkTexture(artwork: FreeArtworkItem): Texture {
   const sourceTexture = useTexture(artwork.imageSource)
   const { gl } = useThree()
@@ -2583,24 +2645,20 @@ function usePreparedFreeArtworkTexture(artwork: FreeArtworkItem): Texture {
 
 type FreeArtworkOverlayProps = {
   artwork: FreeArtworkItem
-  modelScene: Object3D
   preview: boolean
+  targetCache: FreeArtworkTargetCache
 }
 
-function FreeArtworkOverlay({
+const FreeArtworkOverlay = memo(function FreeArtworkOverlay({
   artwork,
-  modelScene,
   preview,
+  targetCache,
 }: FreeArtworkOverlayProps) {
-  const targetMeshes = useMemo(
-    () => getFreeArtworkTargetMeshes(modelScene),
-    [modelScene],
-  )
   const texture = usePreparedFreeArtworkTexture(artwork)
 
   const overlayGroup = useMemo(() => {
     if (
-      targetMeshes.length === 0 ||
+      targetCache.entries.length === 0 ||
       !artwork.visible ||
       !freeArtworkHasProjector(artwork)
     ) {
@@ -2612,6 +2670,11 @@ function FreeArtworkOverlay({
     const projectorPosition = tupleToVector(artwork.projectorPosition)
     const projectorOrientation = getRotatedFreeArtworkOrientation(artwork)
     const projectorSize = getFreeArtworkProjectionSize(artwork)
+    const projectorBounds = getProjectorWorldBounds(
+      projectorPosition,
+      projectorOrientation,
+      projectorSize,
+    )
 
     group.name = preview
       ? `MW_FREE_ART_PREVIEW_${artwork.id}`
@@ -2619,7 +2682,13 @@ function FreeArtworkOverlay({
     group.userData.modifyWrapFreeArtwork = true
     group.userData.freeArtworkId = artwork.id
 
-    for (const targetMesh of targetMeshes) {
+    for (const target of targetCache.entries) {
+      if (!target.worldBounds.intersectsBox(projectorBounds)) {
+        continue
+      }
+
+      const targetMesh = target.mesh
+
       targetMesh.updateWorldMatrix(true, false)
 
       const geometry = new DecalGeometry(
@@ -2652,7 +2721,7 @@ function FreeArtworkOverlay({
     }
 
     return group
-  }, [artwork, preview, targetMeshes, texture])
+  }, [artwork, preview, targetCache, texture])
 
   useEffect(() => {
     return () => {
@@ -2688,18 +2757,18 @@ function FreeArtworkOverlay({
   }, [overlayGroup])
 
   return overlayGroup ? <primitive object={overlayGroup} /> : null
-}
+})
 
 type FreeArtworkOverlaysProps = {
   appliedDesign: AppliedDesignState
   freeArtworkPreview: FreeArtworkPreviewState | null
-  modelScene: Object3D
+  targetCache: FreeArtworkTargetCache
 }
 
 function FreeArtworkOverlays({
   appliedDesign,
   freeArtworkPreview,
-  modelScene,
+  targetCache,
 }: FreeArtworkOverlaysProps) {
   const items = useMemo(
     () => getFreeArtworkItems(appliedDesign, freeArtworkPreview),
@@ -2712,8 +2781,8 @@ function FreeArtworkOverlays({
         <FreeArtworkOverlay
           artwork={artwork}
           key={`${freeArtworkPreview ? 'preview' : 'applied'}-${artwork.id}`}
-          modelScene={modelScene}
           preview={Boolean(freeArtworkPreview)}
+          targetCache={targetCache}
         />
       ))}
     </>
@@ -2788,6 +2857,10 @@ export function S4Model({
   }, [gltf.scene, preparedNativePlateTexture, preparedSurfacePlateTexture])
 
   const modelScene = preparedScene.scene
+  const freeArtworkTargetCache = useMemo(
+    () => getFreeArtworkTargetCache(modelScene),
+    [modelScene],
+  )
 
   useEffect(() => {
     artworkPreviewRef.current = artworkPreview
@@ -2939,7 +3012,7 @@ export function S4Model({
     }
 
     const defaultTransform = getDefaultFreeArtworkTransform(
-      getFreeArtworkTargetMeshes(modelScene),
+      freeArtworkTargetCache,
       camera.position,
     )
 
@@ -2955,8 +3028,8 @@ export function S4Model({
     }
   }, [
     camera.position,
+    freeArtworkTargetCache,
     freeArtworkPreview,
-    modelScene,
     onFreeArtworkTransformChange,
   ])
 
@@ -2979,10 +3052,32 @@ export function S4Model({
       }
     }
 
+    function cancelArtworkDragFrame(drag: ArtworkDragState) {
+      if (drag.animationFrameId !== null) {
+        window.cancelAnimationFrame(drag.animationFrameId)
+        drag.animationFrameId = null
+      }
+
+      drag.latestEvent = null
+    }
+
+    function cancelFreeArtworkDragFrame(drag: FreeArtworkDragState) {
+      if (drag.animationFrameId !== null) {
+        window.cancelAnimationFrame(drag.animationFrameId)
+        drag.animationFrameId = null
+      }
+
+      drag.latestEvent = null
+    }
+
     function stopArtworkDrag(event?: PointerEvent) {
-      if (!artworkDragRef.current) {
+      const drag = artworkDragRef.current
+
+      if (!drag) {
         return
       }
+
+      cancelArtworkDragFrame(drag)
 
       if (event && canvas.hasPointerCapture(event.pointerId)) {
         canvas.releasePointerCapture(event.pointerId)
@@ -2993,9 +3088,13 @@ export function S4Model({
     }
 
     function stopFreeArtworkDrag(event?: PointerEvent) {
-      if (!freeArtworkDragRef.current) {
+      const drag = freeArtworkDragRef.current
+
+      if (!drag) {
         return
       }
+
+      cancelFreeArtworkDragFrame(drag)
 
       if (event && canvas.hasPointerCapture(event.pointerId)) {
         canvas.releasePointerCapture(event.pointerId)
@@ -3054,9 +3153,100 @@ export function S4Model({
         event,
         canvas,
         camera,
-        modelScene,
+        freeArtworkTargetCache,
         raycasterRef.current,
       )
+    }
+
+    function applyArtworkDragTransform(
+      drag: ArtworkDragState,
+      event: PointerEvent,
+    ) {
+      const artworkTransform = getActiveArtworkTransform(event)
+
+      if (!artworkTransform) {
+        return
+      }
+
+      drag.lastTransform = artworkTransform
+      onArtworkPreviewTransformChangeRef.current(artworkTransform)
+    }
+
+    function scheduleArtworkDragTransform(
+      drag: ArtworkDragState,
+      event: PointerEvent,
+    ) {
+      drag.latestEvent = event
+
+      if (drag.animationFrameId !== null) {
+        return
+      }
+
+      drag.animationFrameId = window.requestAnimationFrame(() => {
+        drag.animationFrameId = null
+
+        const latestEvent = drag.latestEvent
+        drag.latestEvent = null
+
+        if (latestEvent) {
+          applyArtworkDragTransform(drag, latestEvent)
+        }
+      })
+    }
+
+    function flushArtworkDragTransform(
+      drag: ArtworkDragState,
+      event: PointerEvent,
+    ) {
+      cancelArtworkDragFrame(drag)
+      applyArtworkDragTransform(drag, event)
+    }
+
+    function applyFreeArtworkDragTransform(
+      drag: FreeArtworkDragState,
+      event: PointerEvent,
+    ) {
+      const freeArtworkTransform = getActiveFreeArtworkTransform(event)
+
+      if (!freeArtworkTransform) {
+        return
+      }
+
+      drag.lastTransform = freeArtworkTransform
+      onFreeArtworkTransformChangeRef.current(
+        drag.artworkId,
+        freeArtworkTransform,
+      )
+    }
+
+    function scheduleFreeArtworkDragTransform(
+      drag: FreeArtworkDragState,
+      event: PointerEvent,
+    ) {
+      drag.latestEvent = event
+
+      if (drag.animationFrameId !== null) {
+        return
+      }
+
+      drag.animationFrameId = window.requestAnimationFrame(() => {
+        drag.animationFrameId = null
+
+        const latestEvent = drag.latestEvent
+        drag.latestEvent = null
+
+        if (latestEvent) {
+          applyFreeArtworkDragTransform(drag, latestEvent)
+        }
+      })
+    }
+
+    function flushFreeArtworkDragTransform(
+      drag: FreeArtworkDragState,
+      event: PointerEvent,
+    ) {
+      cancelFreeArtworkDragFrame(drag)
+      applyFreeArtworkDragTransform(drag, event)
     }
 
     function pointerHitsActiveFreeArtwork(
@@ -3129,7 +3319,10 @@ export function S4Model({
 
         if (freeArtworkTransform) {
           freeArtworkDragRef.current = {
+            animationFrameId: null,
             artworkId: activeFreeArtwork.id,
+            lastTransform: freeArtworkTransform,
+            latestEvent: null,
             pointerId: event.pointerId,
           }
           pointerStartRef.current = null
@@ -3148,6 +3341,9 @@ export function S4Model({
 
       if (artworkTransform) {
         artworkDragRef.current = {
+          animationFrameId: null,
+          lastTransform: artworkTransform,
+          latestEvent: null,
           pointerId: event.pointerId,
         }
         pointerStartRef.current = null
@@ -3174,15 +3370,7 @@ export function S4Model({
       const freeArtworkDrag = freeArtworkDragRef.current
 
       if (freeArtworkDrag?.pointerId === event.pointerId) {
-        const freeArtworkTransform = getActiveFreeArtworkTransform(event)
-
-        if (freeArtworkTransform) {
-          onFreeArtworkTransformChangeRef.current(
-            freeArtworkDrag.artworkId,
-            freeArtworkTransform,
-          )
-        }
-
+        scheduleFreeArtworkDragTransform(freeArtworkDrag, event)
         event.preventDefault()
         return
       }
@@ -3190,12 +3378,7 @@ export function S4Model({
       const artworkDrag = artworkDragRef.current
 
       if (artworkDrag?.pointerId === event.pointerId) {
-        const artworkTransform = getActiveArtworkTransform(event)
-
-        if (artworkTransform) {
-          onArtworkPreviewTransformChangeRef.current(artworkTransform)
-        }
-
+        scheduleArtworkDragTransform(artworkDrag, event)
         event.preventDefault()
         return
       }
@@ -3227,8 +3410,11 @@ export function S4Model({
     }
 
     function handlePointerUp(event: PointerEvent) {
-      if (freeArtworkDragRef.current?.pointerId === event.pointerId) {
+      const freeArtworkDrag = freeArtworkDragRef.current
+
+      if (freeArtworkDrag?.pointerId === event.pointerId) {
         updateTouchPointers(event, false)
+        flushFreeArtworkDragTransform(freeArtworkDrag, event)
         stopFreeArtworkDrag(event)
 
         if (activeTouchPointersRef.current.size === 0) {
@@ -3239,8 +3425,11 @@ export function S4Model({
         return
       }
 
-      if (artworkDragRef.current?.pointerId === event.pointerId) {
+      const artworkDrag = artworkDragRef.current
+
+      if (artworkDrag?.pointerId === event.pointerId) {
         updateTouchPointers(event, false)
+        flushArtworkDragTransform(artworkDrag, event)
         stopArtworkDrag(event)
 
         if (activeTouchPointersRef.current.size === 0) {
@@ -3360,6 +3549,7 @@ export function S4Model({
   }, [
     camera,
     controlsRef,
+    freeArtworkTargetCache,
     gl.domElement,
     modelScene,
     onPartSelect,
@@ -3378,7 +3568,7 @@ export function S4Model({
       <FreeArtworkOverlays
         appliedDesign={appliedDesign}
         freeArtworkPreview={freeArtworkPreview}
-        modelScene={modelScene}
+        targetCache={freeArtworkTargetCache}
       />
     </>
   )

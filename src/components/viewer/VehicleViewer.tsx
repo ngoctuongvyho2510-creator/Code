@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
 } from 'react'
 import { Bounds, OrbitControls, useProgress } from '@react-three/drei'
@@ -30,6 +31,19 @@ import './VehicleViewer.css'
 const INITIAL_VIEW_SAVE_DELAY_MS = 1100
 const MIN_POLAR_ANGLE = 0.01
 const MAX_POLAR_ANGLE = Math.PI - 0.01
+const desktopDprRange: [number, number] = [1, 1.5]
+const mobileDprRange: [number, number] = [1, 1.25]
+
+function getViewerDprRange(): [number, number] {
+  if (
+    typeof window !== 'undefined' &&
+    window.matchMedia('(pointer: coarse)').matches
+  ) {
+    return mobileDprRange
+  }
+
+  return desktopDprRange
+}
 
 export type VehicleViewerHandle = {
   resetView: () => void
@@ -257,6 +271,7 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
     ref,
   ) {
   const resetViewRef = useRef<() => void>(() => undefined)
+  const viewerDprRange = useMemo(() => getViewerDprRange(), [])
 
   const handleResetReady = useCallback((resetView: () => void) => {
     resetViewRef.current = resetView
@@ -288,7 +303,8 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
           aria-hidden="true"
           camera={{ fov: 35, near: 0.1, far: 100, position: [5.4, 2.7, 6.2] }}
           className="vehicle-viewer-canvas"
-          dpr={[1, 2]}
+          dpr={viewerDprRange}
+          frameloop="demand"
           gl={{ antialias: true, powerPreference: 'high-performance' }}
           shadows="percentage"
         >
