@@ -3,6 +3,7 @@ import {
   FULL_BODY_PART_IDS,
   FULL_BODY_TARGET_ID,
   getCaliperPaintScopeOptions,
+  getCeramicScopeOptions,
   getChromeDeleteScopeOptions,
   getLightTintScopeOptions,
   getPpfScopeOptions,
@@ -10,6 +11,7 @@ import {
   getTintScopeOptions,
   getSelectionTarget,
   resolveCaliperPaintScopeTargetIds,
+  resolveCeramicScopeTargetIds,
   resolveChromeDeleteScopeTargetIds,
   resolveLightTintScopeTargetIds,
   resolvePpfScopeTargetIds,
@@ -28,6 +30,7 @@ import {
 import type {
   ArtworkPreviewState,
   CaliperPaintPreviewState,
+  CeramicPreviewState,
   ChromeDeletePreviewState,
   FreeArtworkItem,
   FreeArtworkPreviewState,
@@ -244,6 +247,44 @@ function App() {
     }
   }, [configuratorState.draftSelection])
 
+  const ceramicPreview = useMemo<CeramicPreviewState | null>(() => {
+    const draftSelection = configuratorState.draftSelection
+
+    if (
+      draftSelection?.serviceId !== 'ceramic' ||
+      !draftSelection.ceramicConfig
+    ) {
+      return null
+    }
+
+    if (draftSelection.targetId === FULL_BODY_TARGET_ID) {
+      return {
+        fullBodyBase: true,
+        targetIds: FULL_BODY_PART_IDS,
+        ceramic: draftSelection.ceramicConfig,
+      }
+    }
+
+    if (!draftSelection.ceramicScope) {
+      return null
+    }
+
+    const targetIds = resolveCeramicScopeTargetIds(
+      draftSelection.targetId,
+      draftSelection.ceramicScope,
+    )
+
+    if (targetIds.length === 0) {
+      return null
+    }
+
+    return {
+      fullBodyBase: false,
+      targetIds,
+      ceramic: draftSelection.ceramicConfig,
+    }
+  }, [configuratorState.draftSelection])
+
   const artworkPreview = useMemo<ArtworkPreviewState | null>(() => {
     const draftSelection = configuratorState.draftSelection
     const artworkConfig = draftSelection?.artworkConfig
@@ -300,6 +341,9 @@ function App() {
   const hasFullBodyPpfOverrides = FULL_BODY_PART_IDS.some((partId) =>
     Boolean(configuratorState.appliedDesign.parts[partId]?.ppf),
   )
+  const hasFullBodyCeramicOverrides = FULL_BODY_PART_IDS.some((partId) =>
+    Boolean(configuratorState.appliedDesign.parts[partId]?.ceramic),
+  )
 
   const activeTargetHasDirectWrap = activeTarget
     ? activeTarget.id === FULL_BODY_TARGET_ID
@@ -311,6 +355,11 @@ function App() {
       ? Boolean(configuratorState.appliedDesign.fullBody.ppf)
       : Boolean(configuratorState.appliedDesign.parts[activeTarget.id]?.ppf)
     : false
+  const activeTargetHasDirectCeramic = activeTarget
+    ? activeTarget.id === FULL_BODY_TARGET_ID
+      ? Boolean(configuratorState.appliedDesign.fullBody.ceramic)
+      : Boolean(configuratorState.appliedDesign.parts[activeTarget.id]?.ceramic)
+    : false
 
   const canResetAllWraps =
     activeTarget?.id === FULL_BODY_TARGET_ID &&
@@ -320,6 +369,10 @@ function App() {
     activeTarget?.id === FULL_BODY_TARGET_ID &&
     (Boolean(configuratorState.appliedDesign.fullBody.ppf) ||
       hasFullBodyPpfOverrides)
+  const canResetAllCeramic =
+    activeTarget?.id === FULL_BODY_TARGET_ID &&
+    (Boolean(configuratorState.appliedDesign.fullBody.ceramic) ||
+      hasFullBodyCeramicOverrides)
   const activeTintScope =
     configuratorState.draftSelection?.serviceId === 'tint'
       ? configuratorState.draftSelection.tintScope
@@ -356,6 +409,9 @@ function App() {
     ? getPowderCoatScopeOptions(activeTarget.id)
     : []
   const ppfScopeOptions = activeTarget ? getPpfScopeOptions(activeTarget.id) : []
+  const ceramicScopeOptions = activeTarget
+    ? getCeramicScopeOptions(activeTarget.id)
+    : []
   const canResetTint =
     activeTarget && activeTintScope
       ? resolveTintScopeTargetIds(activeTarget.id, activeTintScope).some(
@@ -486,6 +542,7 @@ function App() {
             freeArtworkPreview={freeArtworkPreview}
             lightTintPreview={lightTintPreview}
             ppfPreview={ppfPreview}
+            ceramicPreview={ceramicPreview}
             powderCoatPreview={powderCoatPreview}
             ref={vehicleViewerRef}
             selectedTargetId={configuratorState.draftSelection?.targetId ?? null}
@@ -545,6 +602,13 @@ function App() {
               ppfConfig={configuratorState.draftSelection?.ppfConfig ?? null}
               ppfScope={configuratorState.draftSelection?.ppfScope ?? null}
               ppfScopeOptions={ppfScopeOptions}
+              ceramicConfig={
+                configuratorState.draftSelection?.ceramicConfig ?? null
+              }
+              ceramicScope={
+                configuratorState.draftSelection?.ceramicScope ?? null
+              }
+              ceramicScopeOptions={ceramicScopeOptions}
               artworkConfig={
                 configuratorState.draftSelection?.artworkConfig ?? null
               }
@@ -569,28 +633,39 @@ function App() {
                 activeTarget.id === FULL_BODY_TARGET_ID &&
                 hasFullBodyPpfOverrides
               }
+              canApplyAllCeramic={
+                activeTarget.id === FULL_BODY_TARGET_ID &&
+                hasFullBodyCeramicOverrides
+              }
               canResetAllWraps={canResetAllWraps}
               canResetAllPpf={canResetAllPpf}
+              canResetAllCeramic={canResetAllCeramic}
               canResetCaliperPaint={canResetCaliperPaint}
               canResetChromeDelete={canResetChromeDelete}
               canResetLightTint={canResetLightTint}
               canResetPowderCoat={canResetPowderCoat}
               canResetTint={canResetTint}
               canResetPpf={activeTargetHasDirectPpf}
+              canResetCeramic={activeTargetHasDirectCeramic}
               canResetWrap={activeTargetHasDirectWrap}
               canRemoveArtwork={Boolean(activeArtworkId)}
               canRemoveAllArtwork={activeTargetArtwork.length > 0}
               onApply={() => dispatch({ type: 'apply-draft' })}
               onApplyAll={() =>
-                configuratorState.draftSelection?.serviceId === 'ppf'
-                  ? dispatch({ type: 'apply-ppf-all' })
-                  : dispatch({ type: 'apply-wrap-all' })
+                configuratorState.draftSelection?.serviceId === 'ceramic'
+                  ? dispatch({ type: 'apply-ceramic-all' })
+                  : configuratorState.draftSelection?.serviceId === 'ppf'
+                    ? dispatch({ type: 'apply-ppf-all' })
+                    : dispatch({ type: 'apply-wrap-all' })
               }
               onBack={handleBack}
               onCancel={() => dispatch({ type: 'cancel-draft' })}
               onClose={() => dispatch({ type: 'cancel-draft' })}
               onResetAllWraps={() => dispatch({ type: 'reset-all-wraps' })}
               onResetAllPpf={() => dispatch({ type: 'reset-all-ppf' })}
+              onResetAllCeramic={() =>
+                dispatch({ type: 'reset-all-ceramic' })
+              }
               onResetCaliperPaint={() =>
                 activeCaliperPaintScope
                   ? dispatch({
@@ -638,6 +713,9 @@ function App() {
               }
               onResetPpf={() =>
                 dispatch({ type: 'reset-ppf', targetId: activeTarget.id })
+              }
+              onResetCeramic={() =>
+                dispatch({ type: 'reset-ceramic', targetId: activeTarget.id })
               }
               onResetWrap={() =>
                 dispatch({ type: 'reset-wrap', targetId: activeTarget.id })
@@ -711,6 +789,12 @@ function App() {
               }
               onUpdatePpfScope={(scope) =>
                 dispatch({ type: 'update-ppf-scope', scope })
+              }
+              onUpdateCeramicDraft={(patch) =>
+                dispatch({ type: 'update-ceramic-draft', patch })
+              }
+              onUpdateCeramicScope={(scope) =>
+                dispatch({ type: 'update-ceramic-scope', scope })
               }
               onUpdateArtworkDraft={(patch) =>
                 dispatch({ type: 'update-artwork-draft', patch })
