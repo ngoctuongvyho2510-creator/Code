@@ -236,6 +236,28 @@
   font-size: 0.82rem;
 }
 
+.part-popup-vlt-input[type='range'] {
+  width: min(150px, 100%);
+  padding: 0;
+}
+
+.part-popup-file-input {
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 8px;
+  border: 1px solid rgba(196, 157, 89, 0.42);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: rgba(9, 9, 9, 0.82);
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.part-popup-file-input:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
+}
+
 .part-popup-hex-input:focus-visible,
 .part-popup-vlt-input:focus-visible {
   outline: 2px solid var(--gold);
@@ -246,6 +268,17 @@
   color: var(--text-secondary);
   font-size: 0.8rem;
   letter-spacing: 0.08em;
+}
+
+.part-popup-warning,
+.part-popup-file-name {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.part-popup-warning {
+  color: #f2c46f;
 }
 
 .part-popup-finish-label {
@@ -285,6 +318,15 @@
   background: var(--gold);
   border-color: var(--gold);
   cursor: pointer;
+}
+
+.part-popup-apply:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.part-popup-add {
+  width: fit-content;
 }
 
 .part-popup-actions--wrap {

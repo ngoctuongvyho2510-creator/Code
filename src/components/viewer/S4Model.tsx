@@ -1,15 +1,18 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { useGLTF, useTexture } from '@react-three/drei'
 import { useThree } from '@react-three/fiber'
 import {
   Box3,
   BufferGeometry,
+  ClampToEdgeWrapping,
   Color,
   EdgesGeometry,
+  Euler,
   FrontSide,
   LineBasicMaterial,
   LineSegments,
   Material,
+  Matrix4,
   Mesh,
   MeshPhysicalMaterial,
   MeshStandardMaterial,
@@ -21,11 +24,15 @@ import {
   Texture,
   Vector2,
   Vector3,
+  MathUtils,
   type Object3DEventMap,
+  type Intersection,
 } from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
+import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import {
+  ARTWORK_MESH_NAMES,
   CALIPER_PAINT_MESH_NAMES,
   CHROME_DELETE_MESH_NAMES,
   FULL_BODY_MESH_NAMES,
@@ -40,12 +47,19 @@ import {
 } from '../../config/vehicleParts'
 import type {
   AppliedDesignState,
+  ArtworkDraftState,
+  ArtworkPlacement,
+  ArtworkPreviewState,
+  ArtworkVector3,
+  ArtworkVector4,
   CaliperPaintConfig,
   CaliperPaintFinish,
   CaliperPaintPreviewState,
   ChromeDeleteConfig,
   ChromeDeleteFinish,
   ChromeDeletePreviewState,
+  FreeArtworkItem,
+  FreeArtworkPreviewState,
   LightTintConfig,
   LightTintPreviewState,
   PowderCoatConfig,
@@ -69,6 +83,13 @@ const CAMERA_ROTATION_EPSILON = 0.001
 const OUTLINE_EDGE_THRESHOLD_DEGREES = 28
 const HOVER_OUTLINE_COLOR = new Color('#c49d59')
 const SELECTED_OUTLINE_COLOR = new Color('#f1c76d')
+const ARTWORK_SURFACE_OFFSET = 0.0015
+const ARTWORK_RENDER_ORDER = 14
+const ARTWORK_PREVIEW_RENDER_ORDER = 16
+const FREE_ARTWORK_RENDER_ORDER = 14.2
+const FREE_ARTWORK_PREVIEW_RENDER_ORDER = 16.2
+const WORLD_UP = new Vector3(0, 1, 0)
+const PROJECTOR_AXIS = new Vector3(0, 0, 1)
 
 type ModelMesh = Mesh<BufferGeometry, Material | Material[], Object3DEventMap>
 
@@ -106,16 +127,49 @@ type PointerStart = {
   target: Vector3 | null
 }
 
+type ArtworkDragState = {
+  animationFrameId: number | null
+  lastTransform: Partial<ArtworkDraftState> | null
+  latestEvent: PointerEvent | null
+  pointerId: number
+}
+
+type FreeArtworkDragState = {
+  animationFrameId: number | null
+  artworkId: string
+  lastTransform: Partial<FreeArtworkItem> | null
+  latestEvent: PointerEvent | null
+  pointerId: number
+}
+
+type FreeArtworkTargetEntry = {
+  mesh: ModelMesh
+  worldBounds: Box3
+}
+
+type FreeArtworkTargetCache = {
+  bounds: Box3 | null
+  entries: FreeArtworkTargetEntry[]
+  meshes: ModelMesh[]
+}
+
 type S4ModelProps = {
   appliedDesign: AppliedDesignState
+  artworkPreview: ArtworkPreviewState | null
   caliperPaintPreview: CaliperPaintPreviewState | null
   controlsRef: RefObject<OrbitControlsImpl | null>
   chromeDeletePreview: ChromeDeletePreviewState | null
+  freeArtworkPreview: FreeArtworkPreviewState | null
   lightTintPreview: LightTintPreviewState | null
   powderCoatPreview: PowderCoatPreviewState | null
   selectedTargetId: string | null
   tintPreview: TintPreviewState | null
   wrapPreview: WrapPreviewState | null
+  onArtworkPreviewTransformChange: (patch: Partial<ArtworkDraftState>) => void
+  onFreeArtworkTransformChange: (
+    artworkId: string,
+    patch: Partial<FreeArtworkItem>,
+  ) => void
   onPartSelect: (partId: string) => void
   onSelectionClear: () => void
 }
@@ -128,6 +182,7 @@ const inspectedPowderCoatMeshScenes = new WeakSet<Object3D>()
 const inspectedTintableMeshScenes = new WeakSet<Object3D>()
 const inspectedWrapMeshScenes = new WeakSet<Object3D>()
 const plateMeshNames = new Set<string>(LICENSE_PLATE_MESH_NAMES)
+const artworkMeshNames = new Set<string>(ARTWORK_MESH_NAMES)
 const caliperPaintMeshNames = new Set<string>(CALIPER_PAINT_MESH_NAMES)
 const chromeDeleteMeshNames = new Set<string>(CHROME_DELETE_MESH_NAMES)
 const lightTintMeshNames = new Set<string>(LIGHT_TINT_MESH_NAMES)
@@ -1723,6 +1778,432 @@ function getTargetMeshNames(targetId: string | null): Set<string> {
   return new Set(target?.meshNames ?? [])
 }
 
+function vectorToTuple(vector: Vector3): ArtworkVector3 {
+  return [
+    Number(vector.x.toFixed(5)),
+    Number(vector.y.toFixed(5)),
+    Number(vector.z.toFixed(5)),
+  ] as const
+}
+
+function eulerToTuple(euler: Euler): ArtworkVector3 {
+  return [
+    Number(euler.x.toFixed(5)),
+    Number(euler.y.toFixed(5)),
+    Number(euler.z.toFixed(5)),
+  ] as const
+}
+
+function tupleToVector(tuple: ArtworkVector3): Vector3 {
+  return new Vector3(tuple[0], tuple[1], tuple[2])
+}
+
+function tupleToEuler(tuple: ArtworkVector3): Euler {
+  return new Euler(tuple[0], tuple[1], tuple[2])
+}
+
+function quaternionToTuple(quaternion: Quaternion): ArtworkVector4 {
+  return [
+    Number(quaternion.x.toFixed(5)),
+    Number(quaternion.y.toFixed(5)),
+    Number(quaternion.z.toFixed(5)),
+    Number(quaternion.w.toFixed(5)),
+  ] as const
+}
+
+function tupleToQuaternion(tuple: ArtworkVector4): Quaternion {
+  return new Quaternion(tuple[0], tuple[1], tuple[2], tuple[3]).normalize()
+}
+
+function getRotatedArtworkOrientation(
+  orientation: ArtworkVector3,
+  rotation: number,
+): Euler {
+  const normal = PROJECTOR_AXIS.clone()
+    .applyEuler(tupleToEuler(orientation))
+    .normalize()
+
+  return createArtworkOrientation(normal, rotation)
+}
+
+function getRotatedFreeArtworkOrientation(artwork: FreeArtworkItem): Euler {
+  const orientation = tupleToQuaternion(artwork.projectorQuaternion)
+  const spin = new Quaternion().setFromAxisAngle(
+    PROJECTOR_AXIS,
+    MathUtils.degToRad(artwork.rotation),
+  )
+
+  orientation.multiply(spin)
+  return new Euler().setFromQuaternion(orientation)
+}
+
+type ArtworkAspectSource = {
+  aspectRatio: number
+  imageHeight: number
+  imageWidth: number
+}
+
+function getArtworkAspectRatio(artwork: ArtworkAspectSource): number {
+  if (artwork.imageWidth > 0 && artwork.imageHeight > 0) {
+    return artwork.imageWidth / artwork.imageHeight
+  }
+
+  if (Number.isFinite(artwork.aspectRatio) && artwork.aspectRatio > 0) {
+    return artwork.aspectRatio
+  }
+
+  return 1
+}
+
+function getArtworkProjectionSize(
+  scale: number,
+  aspectRatio: number,
+): ArtworkVector3 {
+  const safeScale = Math.max(0.01, scale)
+  const safeAspectRatio =
+    Number.isFinite(aspectRatio) && aspectRatio > 0 ? aspectRatio : 1
+  const width =
+    safeAspectRatio >= 1
+      ? safeScale
+      : Math.max(0.01, safeScale * safeAspectRatio)
+  const height =
+    safeAspectRatio >= 1
+      ? Math.max(0.01, safeScale / safeAspectRatio)
+      : safeScale
+  const depth = Math.max(0.08, Math.max(width, height) * 0.45)
+
+  return [width, height, depth] as const
+}
+
+function getArtworkTargetAspect(mesh: ModelMesh): number {
+  const boundingBox = new Box3().setFromObject(mesh)
+  const size = new Vector3()
+
+  boundingBox.getSize(size)
+
+  const dimensions = [size.x, size.y, size.z]
+    .filter((dimension) => dimension > 0.001)
+    .sort((first, second) => second - first)
+
+  if (dimensions.length < 2) {
+    return 1
+  }
+
+  return dimensions[0] / dimensions[1]
+}
+
+function getArtworkTargetMeshes(
+  scene: Object3D,
+  targetId: string,
+): ModelMesh[] {
+  const target = getSelectionTarget(targetId)
+  const targetMeshNames = new Set(target?.meshNames ?? [])
+  const targetMeshes: ModelMesh[] = []
+
+  scene.traverse((object) => {
+    if (
+      isModelMesh(object) &&
+      artworkMeshNames.has(object.name) &&
+      targetMeshNames.has(object.name)
+    ) {
+      targetMeshes.push(object)
+    }
+  })
+
+  return targetMeshes
+}
+
+function getFreeArtworkTargetCache(scene: Object3D): FreeArtworkTargetCache {
+  const entries: FreeArtworkTargetEntry[] = []
+  const bounds = new Box3()
+
+  scene.traverse((object) => {
+    if (isModelMesh(object) && fullBodyMeshNames.has(object.name)) {
+      object.updateWorldMatrix(true, false)
+
+      const worldBounds = new Box3().setFromObject(object)
+
+      entries.push({
+        mesh: object,
+        worldBounds,
+      })
+      bounds.union(worldBounds)
+    }
+  })
+
+  return {
+    bounds: entries.length > 0 ? bounds : null,
+    entries,
+    meshes: entries.map((entry) => entry.mesh),
+  }
+}
+
+function getLargestArtworkMesh(meshes: readonly ModelMesh[]): ModelMesh | null {
+  let largestMesh: ModelMesh | null = null
+  let largestVolume = 0
+
+  for (const mesh of meshes) {
+    const box = new Box3().setFromObject(mesh)
+    const size = new Vector3()
+
+    box.getSize(size)
+
+    const volume = Math.max(0, size.x) * Math.max(0, size.y) * Math.max(0, size.z)
+
+    if (!largestMesh || volume > largestVolume) {
+      largestMesh = mesh
+      largestVolume = volume
+    }
+  }
+
+  return largestMesh
+}
+
+function getLargestFreeArtworkTarget(
+  targetCache: FreeArtworkTargetCache,
+): ModelMesh | null {
+  let largestMesh: ModelMesh | null = null
+  let largestVolume = 0
+  const size = new Vector3()
+
+  for (const entry of targetCache.entries) {
+    entry.worldBounds.getSize(size)
+
+    const volume = Math.max(0, size.x) * Math.max(0, size.y) * Math.max(0, size.z)
+
+    if (!largestMesh || volume > largestVolume) {
+      largestMesh = entry.mesh
+      largestVolume = volume
+    }
+  }
+
+  return largestMesh
+}
+
+function createArtworkOrientation(normal: Vector3, rotation: number): Euler {
+  const cleanNormal = normal.lengthSq() > 0 ? normal.clone().normalize() : WORLD_UP
+  const orientation = new Quaternion().setFromUnitVectors(
+    PROJECTOR_AXIS,
+    cleanNormal,
+  )
+  const spin = new Quaternion().setFromAxisAngle(
+    PROJECTOR_AXIS,
+    MathUtils.degToRad(rotation),
+  )
+
+  orientation.multiply(spin)
+  return new Euler().setFromQuaternion(orientation)
+}
+
+function createProjectorQuaternion(normal: Vector3): Quaternion {
+  const cleanNormal = normal.lengthSq() > 0 ? normal.clone().normalize() : WORLD_UP
+
+  return new Quaternion().setFromUnitVectors(PROJECTOR_AXIS, cleanNormal)
+}
+
+function getIntersectionNormal(
+  intersection: Intersection<Object3D>,
+  cameraPosition: Vector3,
+): Vector3 {
+  if (!intersection.face) {
+    return cameraPosition.clone().sub(intersection.point).normalize()
+  }
+
+  return intersection.face.normal
+    .clone()
+    .transformDirection(intersection.object.matrixWorld)
+    .normalize()
+}
+
+function getArtworkTransformFromIntersection(
+  intersection: Intersection<Object3D>,
+  cameraPosition: Vector3,
+  scale: number,
+  rotation: number,
+  aspectRatio: number,
+): Partial<ArtworkDraftState> {
+  const normal = getIntersectionNormal(intersection, cameraPosition)
+  const position = intersection.point
+    .clone()
+    .addScaledVector(normal, ARTWORK_SURFACE_OFFSET)
+  const orientation = createArtworkOrientation(normal, rotation)
+  const size = getArtworkProjectionSize(scale, aspectRatio)
+
+  return {
+    position: vectorToTuple(position),
+    orientation: eulerToTuple(orientation),
+    size,
+  }
+}
+
+function getFreeArtworkTransformFromIntersection(
+  intersection: Intersection<Object3D>,
+  cameraPosition: Vector3,
+): Partial<FreeArtworkItem> {
+  const normal = getIntersectionNormal(intersection, cameraPosition)
+  const position = intersection.point
+    .clone()
+    .addScaledVector(normal, ARTWORK_SURFACE_OFFSET)
+  const projectorQuaternion = createProjectorQuaternion(normal)
+
+  return {
+    projectorPosition: vectorToTuple(position),
+    projectorQuaternion: quaternionToTuple(projectorQuaternion),
+  }
+}
+
+function getDefaultArtworkTransform(
+  mesh: ModelMesh,
+  cameraPosition: Vector3,
+  scale: number,
+  rotation: number,
+  aspectRatio: number,
+): Partial<ArtworkDraftState> | null {
+  const boundingBox = new Box3().setFromObject(mesh)
+  const center = new Vector3()
+
+  boundingBox.getCenter(center)
+
+  const direction = center.clone().sub(cameraPosition).normalize()
+  const raycaster = new Raycaster(cameraPosition, direction)
+  const intersection = raycaster.intersectObject(mesh, false)[0]
+
+  if (intersection) {
+    return getArtworkTransformFromIntersection(
+      intersection,
+      cameraPosition,
+      scale,
+      rotation,
+      aspectRatio,
+    )
+  }
+
+  const fallbackNormal = cameraPosition.clone().sub(center).normalize()
+  const fallbackPosition = center
+    .clone()
+    .addScaledVector(fallbackNormal, ARTWORK_SURFACE_OFFSET)
+  const fallbackOrientation = createArtworkOrientation(fallbackNormal, rotation)
+
+  return {
+    position: vectorToTuple(fallbackPosition),
+    orientation: eulerToTuple(fallbackOrientation),
+    size: getArtworkProjectionSize(scale, aspectRatio),
+  }
+}
+
+function freeArtworkHasProjector(item: FreeArtworkItem): boolean {
+  return (
+    Math.abs(item.projectorPosition[0]) > 0.0001 ||
+    Math.abs(item.projectorPosition[1]) > 0.0001 ||
+    Math.abs(item.projectorPosition[2]) > 0.0001 ||
+    Math.abs(item.projectorQuaternion[0]) > 0.0001 ||
+    Math.abs(item.projectorQuaternion[1]) > 0.0001 ||
+    Math.abs(item.projectorQuaternion[2]) > 0.0001 ||
+    Math.abs(item.projectorQuaternion[3] - 1) > 0.0001
+  )
+}
+
+function getDefaultFreeArtworkTransform(
+  targetCache: FreeArtworkTargetCache,
+  cameraPosition: Vector3,
+): Partial<FreeArtworkItem> | null {
+  const bounds = targetCache.bounds
+
+  if (!bounds) {
+    return null
+  }
+
+  const center = new Vector3()
+  bounds.getCenter(center)
+
+  const direction = center.clone().sub(cameraPosition).normalize()
+  const raycaster = new Raycaster(cameraPosition, direction)
+  const intersection = raycaster.intersectObjects(targetCache.meshes, false)[0]
+
+  if (intersection) {
+    return getFreeArtworkTransformFromIntersection(intersection, cameraPosition)
+  }
+
+  const fallbackMesh = getLargestFreeArtworkTarget(targetCache)
+
+  if (!fallbackMesh) {
+    return null
+  }
+
+  const fallbackBounds = new Box3().setFromObject(fallbackMesh)
+  const fallbackCenter = new Vector3()
+
+  fallbackBounds.getCenter(fallbackCenter)
+
+  const fallbackNormal = cameraPosition.clone().sub(fallbackCenter).normalize()
+  const fallbackPosition = fallbackCenter
+    .clone()
+    .addScaledVector(fallbackNormal, ARTWORK_SURFACE_OFFSET)
+
+  return {
+    projectorPosition: vectorToTuple(fallbackPosition),
+    projectorQuaternion: quaternionToTuple(
+      createProjectorQuaternion(fallbackNormal),
+    ),
+  }
+}
+
+function getArtworkTransformFromPointer(
+  event: PointerEvent,
+  canvas: HTMLCanvasElement,
+  camera: Parameters<Raycaster['setFromCamera']>[1],
+  scene: Object3D,
+  raycaster: Raycaster,
+  artwork: ArtworkPlacement,
+): Partial<ArtworkDraftState> | null {
+  const targetMeshes = getArtworkTargetMeshes(scene, artwork.targetPartId)
+
+  if (targetMeshes.length === 0) {
+    return null
+  }
+
+  raycaster.setFromCamera(getPointerCoordinates(event, canvas), camera)
+
+  const intersection = raycaster.intersectObjects(targetMeshes, false)[0]
+
+  if (!intersection) {
+    return null
+  }
+
+  return getArtworkTransformFromIntersection(
+    intersection,
+    camera.position,
+    artwork.scale,
+    artwork.rotation,
+    getArtworkAspectRatio(artwork),
+  )
+}
+
+function getFreeArtworkTransformFromPointer(
+  event: PointerEvent,
+  canvas: HTMLCanvasElement,
+  camera: Parameters<Raycaster['setFromCamera']>[1],
+  targetCache: FreeArtworkTargetCache,
+  raycaster: Raycaster,
+): Partial<FreeArtworkItem> | null {
+  if (targetCache.meshes.length === 0) {
+    return null
+  }
+
+  raycaster.setFromCamera(getPointerCoordinates(event, canvas), camera)
+
+  const intersection = raycaster.intersectObjects(targetCache.meshes, false)[0]
+
+  if (!intersection) {
+    return null
+  }
+
+  return getFreeArtworkTransformFromIntersection(
+    intersection,
+    camera.position,
+  )
+}
+
 function getPointerCoordinates(
   event: PointerEvent,
   element: HTMLCanvasElement,
@@ -1832,23 +2313,515 @@ function getSelectionThreshold(pointerType: string): number {
     : MOUSE_CLICK_THRESHOLD_PX
 }
 
+function createArtworkMaterial(texture: Texture): MeshStandardMaterial {
+  const material = new MeshStandardMaterial({
+    alphaTest: 0.02,
+    depthTest: true,
+    depthWrite: false,
+    map: texture,
+    metalness: 0,
+    opacity: 1,
+    polygonOffset: true,
+    polygonOffsetFactor: -6,
+    polygonOffsetUnits: -6,
+    roughness: 0.38,
+    side: FrontSide,
+    toneMapped: true,
+    transparent: true,
+  })
+
+  material.name = 'ModifyWrap Artwork Overlay'
+  return material
+}
+
+function getAppliedArtworkPlacements(
+  appliedDesign: AppliedDesignState,
+): ArtworkPlacement[] {
+  return Object.values(appliedDesign.parts).flatMap((partState) => [
+    ...partState.artwork,
+  ])
+}
+
+type ArtworkOverlayItem = {
+  artwork: ArtworkPlacement
+  preview: boolean
+}
+
+function getArtworkOverlayItems(
+  appliedDesign: AppliedDesignState,
+  artworkPreview: ArtworkPreviewState | null,
+): ArtworkOverlayItem[] {
+  const items = getAppliedArtworkPlacements(appliedDesign).map((artwork) => ({
+    artwork,
+    preview: false,
+  }))
+
+  if (artworkPreview?.artwork.imageSource) {
+    items.push({
+      artwork: artworkPreview.artwork,
+      preview: true,
+    })
+  }
+
+  return items
+}
+
+function usePreparedArtworkTexture(
+  artwork: ArtworkPlacement,
+  targetAspectRatio: number,
+): Texture {
+  const sourceTexture = useTexture(artwork.imageSource)
+  const { gl } = useThree()
+
+  const texture = useMemo(() => {
+    const preparedTexture = sourceTexture.clone()
+
+    preparedTexture.anisotropy = Math.min(
+      8,
+      gl.capabilities.getMaxAnisotropy(),
+    )
+    preparedTexture.center.set(0.5, 0.5)
+    preparedTexture.colorSpace = SRGBColorSpace
+    preparedTexture.flipY = artwork.mode !== 'fill'
+    preparedTexture.wrapS = ClampToEdgeWrapping
+    preparedTexture.wrapT = ClampToEdgeWrapping
+
+    if (artwork.mode === 'fill') {
+      const sourceAspectRatio = getArtworkAspectRatio(artwork)
+      const safeTargetAspectRatio =
+        Number.isFinite(targetAspectRatio) && targetAspectRatio > 0
+          ? targetAspectRatio
+          : 1
+      const zoom = Math.max(1, artwork.scale)
+      const baseRepeatX =
+        sourceAspectRatio > safeTargetAspectRatio
+          ? safeTargetAspectRatio / sourceAspectRatio
+          : 1
+      const baseRepeatY =
+        sourceAspectRatio > safeTargetAspectRatio
+          ? 1
+          : sourceAspectRatio / safeTargetAspectRatio
+      const repeatX = Math.min(1, baseRepeatX / zoom)
+      const repeatY = Math.min(1, baseRepeatY / zoom)
+      const offsetX = (artwork.offsetX ?? 0) * (1 - repeatX) * 0.5
+      const offsetY = (artwork.offsetY ?? 0) * (1 - repeatY) * 0.5
+
+      preparedTexture.repeat.set(repeatX, repeatY)
+      preparedTexture.offset.set(
+        0.5 - repeatX / 2 + offsetX,
+        0.5 - repeatY / 2 + offsetY,
+      )
+      preparedTexture.rotation = MathUtils.degToRad(artwork.rotation)
+    }
+
+    preparedTexture.needsUpdate = true
+    return preparedTexture
+  }, [
+    artwork,
+    gl.capabilities,
+    sourceTexture,
+    targetAspectRatio,
+  ])
+
+  useEffect(() => {
+    return () => {
+      texture.dispose()
+    }
+  }, [texture])
+
+  return texture
+}
+
+type ArtworkOverlayProps = {
+  artwork: ArtworkPlacement
+  modelScene: Object3D
+  preview: boolean
+}
+
+function ArtworkOverlay({
+  artwork,
+  modelScene,
+  preview,
+}: ArtworkOverlayProps) {
+  const { camera } = useThree()
+
+  const targetMesh = useMemo(
+    () =>
+      getLargestArtworkMesh(
+        getArtworkTargetMeshes(modelScene, artwork.targetPartId),
+      ),
+    [artwork.targetPartId, modelScene],
+  )
+  const targetAspectRatio = useMemo(
+    () => (targetMesh ? getArtworkTargetAspect(targetMesh) : 1),
+    [targetMesh],
+  )
+  const texture = usePreparedArtworkTexture(artwork, targetAspectRatio)
+
+  const overlay = useMemo(() => {
+    if (!targetMesh) {
+      return null
+    }
+
+    const material = createArtworkMaterial(texture)
+    let overlayMesh: Mesh<BufferGeometry, MeshStandardMaterial>
+
+    if (artwork.mode === 'fill' && targetMesh.geometry.hasAttribute('uv')) {
+      targetMesh.updateWorldMatrix(true, false)
+
+      overlayMesh = new Mesh(targetMesh.geometry.clone(), material)
+      overlayMesh.matrix.copy(targetMesh.matrixWorld)
+      overlayMesh.matrixAutoUpdate = false
+      overlayMesh.frustumCulled = false
+    } else {
+      const fallbackTransform = getDefaultArtworkTransform(
+        targetMesh,
+        camera.position,
+        artwork.scale,
+        artwork.rotation,
+        getArtworkAspectRatio(artwork),
+      )
+      const position =
+        artwork.position ??
+        fallbackTransform?.position ??
+        ([0, 0, 0] as const)
+      const orientation =
+        artwork.orientation ??
+        fallbackTransform?.orientation ??
+        ([0, 0, 0] as const)
+      const size =
+        fallbackTransform?.size ??
+        getArtworkProjectionSize(artwork.scale, getArtworkAspectRatio(artwork))
+
+      overlayMesh = new Mesh(
+        new DecalGeometry(
+          targetMesh,
+          tupleToVector(position),
+          getRotatedArtworkOrientation(orientation, artwork.rotation),
+          tupleToVector(size),
+        ),
+        material,
+      )
+    }
+
+    overlayMesh.name = preview
+      ? `MW_ARTWORK_PREVIEW_${artwork.id}`
+      : `MW_ARTWORK_${artwork.id}`
+    overlayMesh.renderOrder = preview
+      ? ARTWORK_PREVIEW_RENDER_ORDER
+      : ARTWORK_RENDER_ORDER
+    overlayMesh.userData.modifyWrapArtwork = true
+    overlayMesh.raycast = () => undefined
+
+    return overlayMesh
+  }, [
+    artwork,
+    camera.position,
+    preview,
+    targetMesh,
+    texture,
+  ])
+
+  useEffect(() => {
+    return () => {
+      if (!overlay) {
+        return
+      }
+
+      overlay.geometry.dispose()
+      disposeMaterial(overlay.material)
+    }
+  }, [overlay])
+
+  return overlay ? <primitive object={overlay} /> : null
+}
+
+type ArtworkOverlaysProps = {
+  appliedDesign: AppliedDesignState
+  artworkPreview: ArtworkPreviewState | null
+  modelScene: Object3D
+}
+
+function ArtworkOverlays({
+  appliedDesign,
+  artworkPreview,
+  modelScene,
+}: ArtworkOverlaysProps) {
+  const overlayItems = useMemo(
+    () => getArtworkOverlayItems(appliedDesign, artworkPreview),
+    [appliedDesign, artworkPreview],
+  )
+
+  return (
+    <>
+      {overlayItems.map((item) => (
+        <ArtworkOverlay
+          artwork={item.artwork}
+          key={`${item.preview ? 'preview' : 'applied'}-${item.artwork.id}`}
+          modelScene={modelScene}
+          preview={item.preview}
+        />
+      ))}
+    </>
+  )
+}
+
+function getFreeArtworkItems(
+  appliedDesign: AppliedDesignState,
+  freeArtworkPreview: FreeArtworkPreviewState | null,
+): FreeArtworkItem[] {
+  const items = freeArtworkPreview?.items ?? appliedDesign.freeArtwork
+
+  return [...items]
+    .filter((item) => item.visible && item.imageSource)
+    .sort((first, second) => first.layerOrder - second.layerOrder)
+}
+
+function getFreeArtworkProjectionSize(artwork: FreeArtworkItem): Vector3 {
+  const [width, height, baseDepth] = getArtworkProjectionSize(
+    artwork.uniformScale,
+    getArtworkAspectRatio(artwork),
+  )
+  const depth = Math.max(baseDepth, Math.max(width, height) * 0.72)
+
+  return new Vector3(width, height, depth)
+}
+
+function getProjectorWorldBounds(
+  position: Vector3,
+  orientation: Euler,
+  size: Vector3,
+): Box3 {
+  const halfSize = size.clone().multiplyScalar(0.5)
+  const matrix = new Matrix4().compose(
+    position,
+    new Quaternion().setFromEuler(orientation),
+    new Vector3(1, 1, 1),
+  )
+  const bounds = new Box3()
+  const corner = new Vector3()
+
+  for (const x of [-halfSize.x, halfSize.x]) {
+    for (const y of [-halfSize.y, halfSize.y]) {
+      for (const z of [-halfSize.z, halfSize.z]) {
+        corner.set(x, y, z).applyMatrix4(matrix)
+        bounds.expandByPoint(corner)
+      }
+    }
+  }
+
+  return bounds
+}
+
+function usePreparedFreeArtworkTexture(artwork: FreeArtworkItem): Texture {
+  const sourceTexture = useTexture(artwork.imageSource)
+  const { gl } = useThree()
+
+  const texture = useMemo(() => {
+    const preparedTexture = sourceTexture.clone()
+
+    preparedTexture.anisotropy = Math.min(
+      8,
+      gl.capabilities.getMaxAnisotropy(),
+    )
+    preparedTexture.center.set(0.5, 0.5)
+    preparedTexture.colorSpace = SRGBColorSpace
+    preparedTexture.flipY = true
+    preparedTexture.wrapS = ClampToEdgeWrapping
+    preparedTexture.wrapT = ClampToEdgeWrapping
+    preparedTexture.needsUpdate = true
+
+    return preparedTexture
+  }, [gl.capabilities, sourceTexture])
+
+  useEffect(() => {
+    return () => {
+      texture.dispose()
+    }
+  }, [texture])
+
+  return texture
+}
+
+type FreeArtworkOverlayProps = {
+  artwork: FreeArtworkItem
+  preview: boolean
+  targetCache: FreeArtworkTargetCache
+}
+
+const FreeArtworkOverlay = memo(function FreeArtworkOverlay({
+  artwork,
+  preview,
+  targetCache,
+}: FreeArtworkOverlayProps) {
+  const texture = usePreparedFreeArtworkTexture(artwork)
+
+  const overlayGroup = useMemo(() => {
+    if (
+      targetCache.entries.length === 0 ||
+      !artwork.visible ||
+      !freeArtworkHasProjector(artwork)
+    ) {
+      return null
+    }
+
+    const group = new Object3D()
+    const material = createArtworkMaterial(texture)
+    const projectorPosition = tupleToVector(artwork.projectorPosition)
+    const projectorOrientation = getRotatedFreeArtworkOrientation(artwork)
+    const projectorSize = getFreeArtworkProjectionSize(artwork)
+    const projectorBounds = getProjectorWorldBounds(
+      projectorPosition,
+      projectorOrientation,
+      projectorSize,
+    )
+
+    group.name = preview
+      ? `MW_FREE_ART_PREVIEW_${artwork.id}`
+      : `MW_FREE_ART_${artwork.id}`
+    group.userData.modifyWrapFreeArtwork = true
+    group.userData.freeArtworkId = artwork.id
+
+    for (const target of targetCache.entries) {
+      if (!target.worldBounds.intersectsBox(projectorBounds)) {
+        continue
+      }
+
+      const targetMesh = target.mesh
+
+      targetMesh.updateWorldMatrix(true, false)
+
+      const geometry = new DecalGeometry(
+        targetMesh,
+        projectorPosition,
+        projectorOrientation,
+        projectorSize,
+      )
+      const positionAttribute = geometry.getAttribute('position')
+
+      if (!positionAttribute || positionAttribute.count === 0) {
+        geometry.dispose()
+        continue
+      }
+
+      const fragment = new Mesh(geometry, material)
+      fragment.name = `${group.name}_${targetMesh.name}`
+      fragment.renderOrder =
+        (preview ? FREE_ARTWORK_PREVIEW_RENDER_ORDER : FREE_ARTWORK_RENDER_ORDER) +
+        artwork.layerOrder * 0.01
+      fragment.userData.modifyWrapFreeArtwork = true
+      fragment.userData.freeArtworkId = artwork.id
+      fragment.userData.sourceMeshName = targetMesh.name
+      group.add(fragment)
+    }
+
+    if (group.children.length === 0) {
+      disposeMaterial(material)
+      return null
+    }
+
+    return group
+  }, [artwork, preview, targetCache, texture])
+
+  useEffect(() => {
+    return () => {
+      if (!overlayGroup) {
+        return
+      }
+
+      const disposedMaterials = new Set<Material>()
+
+      overlayGroup.traverse((object) => {
+        if (!isModelMesh(object)) {
+          return
+        }
+
+        object.geometry.dispose()
+
+        if (Array.isArray(object.material)) {
+          for (const material of object.material) {
+            if (!disposedMaterials.has(material)) {
+              material.dispose()
+              disposedMaterials.add(material)
+            }
+          }
+          return
+        }
+
+        if (!disposedMaterials.has(object.material)) {
+          object.material.dispose()
+          disposedMaterials.add(object.material)
+        }
+      })
+    }
+  }, [overlayGroup])
+
+  return overlayGroup ? <primitive object={overlayGroup} /> : null
+})
+
+type FreeArtworkOverlaysProps = {
+  appliedDesign: AppliedDesignState
+  freeArtworkPreview: FreeArtworkPreviewState | null
+  targetCache: FreeArtworkTargetCache
+}
+
+function FreeArtworkOverlays({
+  appliedDesign,
+  freeArtworkPreview,
+  targetCache,
+}: FreeArtworkOverlaysProps) {
+  const items = useMemo(
+    () => getFreeArtworkItems(appliedDesign, freeArtworkPreview),
+    [appliedDesign, freeArtworkPreview],
+  )
+
+  return (
+    <>
+      {items.map((artwork) => (
+        <FreeArtworkOverlay
+          artwork={artwork}
+          key={`${freeArtworkPreview ? 'preview' : 'applied'}-${artwork.id}`}
+          preview={Boolean(freeArtworkPreview)}
+          targetCache={targetCache}
+        />
+      ))}
+    </>
+  )
+}
+
 export function S4Model({
   appliedDesign,
+  artworkPreview,
   caliperPaintPreview,
   chromeDeletePreview,
   controlsRef,
+  freeArtworkPreview,
   lightTintPreview,
   powderCoatPreview,
   selectedTargetId,
   tintPreview,
   wrapPreview,
+  onArtworkPreviewTransformChange,
+  onFreeArtworkTransformChange,
   onPartSelect,
   onSelectionClear,
 }: S4ModelProps) {
   const gltf = useGLTF(MODEL_URL)
   const plateTexture = useTexture(PLATE_TEXTURE_URL)
-  const { camera, gl } = useThree()
+  const { camera, gl, scene: rootScene } = useThree()
   const pointerStartRef = useRef<PointerStart | null>(null)
+  const artworkDragRef = useRef<ArtworkDragState | null>(null)
+  const freeArtworkDragRef = useRef<FreeArtworkDragState | null>(null)
+  const artworkPreviewRef = useRef<ArtworkPreviewState | null>(artworkPreview)
+  const freeArtworkPreviewRef =
+    useRef<FreeArtworkPreviewState | null>(freeArtworkPreview)
+  const selectedTargetIdRef = useRef<string | null>(selectedTargetId)
+  const onArtworkPreviewTransformChangeRef = useRef(
+    onArtworkPreviewTransformChange,
+  )
+  const onFreeArtworkTransformChangeRef = useRef(
+    onFreeArtworkTransformChange,
+  )
   const raycasterRef = useRef(new Raycaster())
   const activeTouchPointersRef = useRef(new Set<number>())
   const multiTouchGestureRef = useRef(false)
@@ -1884,6 +2857,25 @@ export function S4Model({
   }, [gltf.scene, preparedNativePlateTexture, preparedSurfacePlateTexture])
 
   const modelScene = preparedScene.scene
+  const freeArtworkTargetCache = useMemo(
+    () => getFreeArtworkTargetCache(modelScene),
+    [modelScene],
+  )
+
+  useEffect(() => {
+    artworkPreviewRef.current = artworkPreview
+    freeArtworkPreviewRef.current = freeArtworkPreview
+    selectedTargetIdRef.current = selectedTargetId
+    onArtworkPreviewTransformChangeRef.current =
+      onArtworkPreviewTransformChange
+    onFreeArtworkTransformChangeRef.current = onFreeArtworkTransformChange
+  }, [
+    artworkPreview,
+    freeArtworkPreview,
+    onArtworkPreviewTransformChange,
+    onFreeArtworkTransformChange,
+    selectedTargetId,
+  ])
 
   const selectedMeshNames = useMemo(
     () => getTargetMeshNames(selectedTargetId),
@@ -1969,6 +2961,79 @@ export function S4Model({
   }, [hoveredMeshNames, modelScene, selectedMeshNames])
 
   useEffect(() => {
+    const artwork = artworkPreview?.artwork
+
+    if (
+      !artwork ||
+      artwork.mode !== 'place' ||
+      !artwork.imageSource ||
+      (artwork.position && artwork.orientation && artwork.size)
+    ) {
+      return
+    }
+
+    const targetMesh = getLargestArtworkMesh(
+      getArtworkTargetMeshes(modelScene, artwork.targetPartId),
+    )
+
+    if (!targetMesh) {
+      return
+    }
+
+    const defaultTransform = getDefaultArtworkTransform(
+      targetMesh,
+      camera.position,
+      artwork.scale,
+      artwork.rotation,
+      getArtworkAspectRatio(artwork),
+    )
+
+    if (defaultTransform) {
+      onArtworkPreviewTransformChange(defaultTransform)
+    }
+  }, [
+    artworkPreview?.artwork,
+    camera.position,
+    modelScene,
+    onArtworkPreviewTransformChange,
+  ])
+
+  useEffect(() => {
+    const selectedFreeArtwork = freeArtworkPreview?.items.find(
+      (item) => item.id === freeArtworkPreview.selectedItemId,
+    )
+
+    if (
+      !selectedFreeArtwork ||
+      !selectedFreeArtwork.imageSource ||
+      freeArtworkHasProjector(selectedFreeArtwork)
+    ) {
+      return
+    }
+
+    const defaultTransform = getDefaultFreeArtworkTransform(
+      freeArtworkTargetCache,
+      camera.position,
+    )
+
+    if (defaultTransform) {
+      onFreeArtworkTransformChange(
+        selectedFreeArtwork.id,
+        defaultTransform,
+      )
+    } else {
+      console.warn(
+        'ModifyWrap Free Art could not find a valid painted body placement.',
+      )
+    }
+  }, [
+    camera.position,
+    freeArtworkTargetCache,
+    freeArtworkPreview,
+    onFreeArtworkTransformChange,
+  ])
+
+  useEffect(() => {
     document.body.style.cursor = hoveredPartId ? 'pointer' : ''
 
     return () => {
@@ -1978,6 +3043,240 @@ export function S4Model({
 
   useEffect(() => {
     const canvas = gl.domElement
+
+    function setControlsEnabled(enabled: boolean) {
+      const controls = controlsRef.current
+
+      if (controls) {
+        controls.enabled = enabled
+      }
+    }
+
+    function cancelArtworkDragFrame(drag: ArtworkDragState) {
+      if (drag.animationFrameId !== null) {
+        window.cancelAnimationFrame(drag.animationFrameId)
+        drag.animationFrameId = null
+      }
+
+      drag.latestEvent = null
+    }
+
+    function cancelFreeArtworkDragFrame(drag: FreeArtworkDragState) {
+      if (drag.animationFrameId !== null) {
+        window.cancelAnimationFrame(drag.animationFrameId)
+        drag.animationFrameId = null
+      }
+
+      drag.latestEvent = null
+    }
+
+    function stopArtworkDrag(event?: PointerEvent) {
+      const drag = artworkDragRef.current
+
+      if (!drag) {
+        return
+      }
+
+      cancelArtworkDragFrame(drag)
+
+      if (event && canvas.hasPointerCapture(event.pointerId)) {
+        canvas.releasePointerCapture(event.pointerId)
+      }
+
+      artworkDragRef.current = null
+      setControlsEnabled(true)
+    }
+
+    function stopFreeArtworkDrag(event?: PointerEvent) {
+      const drag = freeArtworkDragRef.current
+
+      if (!drag) {
+        return
+      }
+
+      cancelFreeArtworkDragFrame(drag)
+
+      if (event && canvas.hasPointerCapture(event.pointerId)) {
+        canvas.releasePointerCapture(event.pointerId)
+      }
+
+      freeArtworkDragRef.current = null
+      setControlsEnabled(true)
+    }
+
+    function getActiveArtworkTransform(
+      event: PointerEvent,
+    ): Partial<ArtworkDraftState> | null {
+      const artwork = artworkPreviewRef.current?.artwork
+
+      if (
+        !artwork ||
+        artwork.mode !== 'place' ||
+        !artwork.imageSource ||
+        artwork.targetPartId !== selectedTargetIdRef.current
+      ) {
+        return null
+      }
+
+      return getArtworkTransformFromPointer(
+        event,
+        canvas,
+        camera,
+        modelScene,
+        raycasterRef.current,
+        artwork,
+      )
+    }
+
+    function getActiveFreeArtworkItem(): FreeArtworkItem | null {
+      const preview = freeArtworkPreviewRef.current
+
+      if (!preview?.selectedItemId) {
+        return null
+      }
+
+      return (
+        preview.items.find((item) => item.id === preview.selectedItemId) ?? null
+      )
+    }
+
+    function getActiveFreeArtworkTransform(
+      event: PointerEvent,
+    ): Partial<FreeArtworkItem> | null {
+      const artwork = getActiveFreeArtworkItem()
+
+      if (!artwork?.imageSource || artwork.locked) {
+        return null
+      }
+
+      return getFreeArtworkTransformFromPointer(
+        event,
+        canvas,
+        camera,
+        freeArtworkTargetCache,
+        raycasterRef.current,
+      )
+    }
+
+    function applyArtworkDragTransform(
+      drag: ArtworkDragState,
+      event: PointerEvent,
+    ) {
+      const artworkTransform = getActiveArtworkTransform(event)
+
+      if (!artworkTransform) {
+        return
+      }
+
+      drag.lastTransform = artworkTransform
+      onArtworkPreviewTransformChangeRef.current(artworkTransform)
+    }
+
+    function scheduleArtworkDragTransform(
+      drag: ArtworkDragState,
+      event: PointerEvent,
+    ) {
+      drag.latestEvent = event
+
+      if (drag.animationFrameId !== null) {
+        return
+      }
+
+      drag.animationFrameId = window.requestAnimationFrame(() => {
+        drag.animationFrameId = null
+
+        const latestEvent = drag.latestEvent
+        drag.latestEvent = null
+
+        if (latestEvent) {
+          applyArtworkDragTransform(drag, latestEvent)
+        }
+      })
+    }
+
+    function flushArtworkDragTransform(
+      drag: ArtworkDragState,
+      event: PointerEvent,
+    ) {
+      cancelArtworkDragFrame(drag)
+      applyArtworkDragTransform(drag, event)
+    }
+
+    function applyFreeArtworkDragTransform(
+      drag: FreeArtworkDragState,
+      event: PointerEvent,
+    ) {
+      const freeArtworkTransform = getActiveFreeArtworkTransform(event)
+
+      if (!freeArtworkTransform) {
+        return
+      }
+
+      drag.lastTransform = freeArtworkTransform
+      onFreeArtworkTransformChangeRef.current(
+        drag.artworkId,
+        freeArtworkTransform,
+      )
+    }
+
+    function scheduleFreeArtworkDragTransform(
+      drag: FreeArtworkDragState,
+      event: PointerEvent,
+    ) {
+      drag.latestEvent = event
+
+      if (drag.animationFrameId !== null) {
+        return
+      }
+
+      drag.animationFrameId = window.requestAnimationFrame(() => {
+        drag.animationFrameId = null
+
+        const latestEvent = drag.latestEvent
+        drag.latestEvent = null
+
+        if (latestEvent) {
+          applyFreeArtworkDragTransform(drag, latestEvent)
+        }
+      })
+    }
+
+    function flushFreeArtworkDragTransform(
+      drag: FreeArtworkDragState,
+      event: PointerEvent,
+    ) {
+      cancelFreeArtworkDragFrame(drag)
+      applyFreeArtworkDragTransform(drag, event)
+    }
+
+    function pointerHitsActiveFreeArtwork(
+      event: PointerEvent,
+      artworkId: string,
+    ): boolean {
+      const overlayFragments: Object3D[] = []
+
+      rootScene.traverse((object) => {
+        if (
+          object.userData.modifyWrapFreeArtwork === true &&
+          object.userData.freeArtworkId === artworkId &&
+          isModelMesh(object)
+        ) {
+          overlayFragments.push(object)
+        }
+      })
+
+      if (overlayFragments.length === 0) {
+        return false
+      }
+
+      raycasterRef.current.setFromCamera(
+        getPointerCoordinates(event, canvas),
+        camera,
+      )
+
+      return raycasterRef.current.intersectObjects(overlayFragments, false)
+        .length > 0
+    }
 
     function updateTouchPointers(event: PointerEvent, active: boolean) {
       if (event.pointerType !== 'touch') {
@@ -1993,6 +3292,8 @@ export function S4Model({
       if (activeTouchPointersRef.current.size > 1) {
         multiTouchGestureRef.current = true
         pointerStartRef.current = null
+        stopArtworkDrag(event)
+        stopFreeArtworkDrag(event)
       }
     }
 
@@ -2005,6 +3306,51 @@ export function S4Model({
         activeTouchPointersRef.current.size > 1
       ) {
         pointerStartRef.current = null
+        return
+      }
+
+      const activeFreeArtwork = getActiveFreeArtworkItem()
+
+      if (
+        activeFreeArtwork &&
+        pointerHitsActiveFreeArtwork(event, activeFreeArtwork.id)
+      ) {
+        const freeArtworkTransform = getActiveFreeArtworkTransform(event)
+
+        if (freeArtworkTransform) {
+          freeArtworkDragRef.current = {
+            animationFrameId: null,
+            artworkId: activeFreeArtwork.id,
+            lastTransform: freeArtworkTransform,
+            latestEvent: null,
+            pointerId: event.pointerId,
+          }
+          pointerStartRef.current = null
+          setControlsEnabled(false)
+          canvas.setPointerCapture(event.pointerId)
+          onFreeArtworkTransformChangeRef.current(
+            activeFreeArtwork.id,
+            freeArtworkTransform,
+          )
+          event.preventDefault()
+          return
+        }
+      }
+
+      const artworkTransform = getActiveArtworkTransform(event)
+
+      if (artworkTransform) {
+        artworkDragRef.current = {
+          animationFrameId: null,
+          lastTransform: artworkTransform,
+          latestEvent: null,
+          pointerId: event.pointerId,
+        }
+        pointerStartRef.current = null
+        setControlsEnabled(false)
+        canvas.setPointerCapture(event.pointerId)
+        onArtworkPreviewTransformChangeRef.current(artworkTransform)
+        event.preventDefault()
         return
       }
 
@@ -2021,6 +3367,22 @@ export function S4Model({
     }
 
     function handlePointerMove(event: PointerEvent) {
+      const freeArtworkDrag = freeArtworkDragRef.current
+
+      if (freeArtworkDrag?.pointerId === event.pointerId) {
+        scheduleFreeArtworkDragTransform(freeArtworkDrag, event)
+        event.preventDefault()
+        return
+      }
+
+      const artworkDrag = artworkDragRef.current
+
+      if (artworkDrag?.pointerId === event.pointerId) {
+        scheduleArtworkDragTransform(artworkDrag, event)
+        event.preventDefault()
+        return
+      }
+
       const pointerStart = pointerStartRef.current
 
       if (pointerStart) {
@@ -2048,6 +3410,36 @@ export function S4Model({
     }
 
     function handlePointerUp(event: PointerEvent) {
+      const freeArtworkDrag = freeArtworkDragRef.current
+
+      if (freeArtworkDrag?.pointerId === event.pointerId) {
+        updateTouchPointers(event, false)
+        flushFreeArtworkDragTransform(freeArtworkDrag, event)
+        stopFreeArtworkDrag(event)
+
+        if (activeTouchPointersRef.current.size === 0) {
+          multiTouchGestureRef.current = false
+        }
+
+        event.preventDefault()
+        return
+      }
+
+      const artworkDrag = artworkDragRef.current
+
+      if (artworkDrag?.pointerId === event.pointerId) {
+        updateTouchPointers(event, false)
+        flushArtworkDragTransform(artworkDrag, event)
+        stopArtworkDrag(event)
+
+        if (activeTouchPointersRef.current.size === 0) {
+          multiTouchGestureRef.current = false
+        }
+
+        event.preventDefault()
+        return
+      }
+
       const pointerStart = pointerStartRef.current
       pointerStartRef.current = null
       const wasMultiTouchGesture = multiTouchGestureRef.current
@@ -2084,6 +3476,21 @@ export function S4Model({
         return
       }
 
+      const activeFreeArtwork = getActiveFreeArtworkItem()
+
+      if (activeFreeArtwork && !activeFreeArtwork.locked) {
+        const freeArtworkTransform = getActiveFreeArtworkTransform(event)
+
+        if (freeArtworkTransform) {
+          onFreeArtworkTransformChangeRef.current(
+            activeFreeArtwork.id,
+            freeArtworkTransform,
+          )
+          event.preventDefault()
+          return
+        }
+      }
+
       const partId = getPartIdFromPointer(
         event,
         canvas,
@@ -2101,6 +3508,8 @@ export function S4Model({
 
     function handlePointerCancel(event: PointerEvent) {
       updateTouchPointers(event, false)
+      stopArtworkDrag(event)
+      stopFreeArtworkDrag(event)
       pointerStartRef.current = null
       setHoveredPartId(null)
 
@@ -2110,6 +3519,8 @@ export function S4Model({
     }
 
     function handlePointerLeave() {
+      stopArtworkDrag()
+      stopFreeArtworkDrag()
       pointerStartRef.current = null
       setHoveredPartId(null)
     }
@@ -2132,15 +3543,33 @@ export function S4Model({
       canvas.removeEventListener('pointercancel', handlePointerCancel)
       canvas.removeEventListener('pointerleave', handlePointerLeave)
       canvas.removeEventListener('contextmenu', preventContextMenu)
+      stopArtworkDrag()
+      stopFreeArtworkDrag()
     }
   }, [
     camera,
     controlsRef,
+    freeArtworkTargetCache,
     gl.domElement,
     modelScene,
     onPartSelect,
     onSelectionClear,
+    rootScene,
   ])
 
-  return <primitive object={modelScene} />
+  return (
+    <>
+      <primitive object={modelScene} />
+      <ArtworkOverlays
+        appliedDesign={appliedDesign}
+        artworkPreview={artworkPreview}
+        modelScene={modelScene}
+      />
+      <FreeArtworkOverlays
+        appliedDesign={appliedDesign}
+        freeArtworkPreview={freeArtworkPreview}
+        targetCache={freeArtworkTargetCache}
+      />
+    </>
+  )
 }

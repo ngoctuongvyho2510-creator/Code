@@ -7,6 +7,7 @@ import {
   getDefaultPowderCoatScope,
   getDefaultTintScope,
   getSelectionTarget,
+  isArtworkTarget,
   resolveCaliperPaintScopeTargetIds,
   resolveChromeDeleteScopeTargetIds,
   resolveLightTintScopeTargetIds,
@@ -15,6 +16,11 @@ import {
 } from '../config/vehicleParts'
 import type {
   AppliedDesignState,
+  ArtworkDraftState,
+  ArtworkMode,
+  ArtworkPlacement,
+  ArtworkVector3,
+  ArtworkVector4,
   CaliperPaintConfig,
   CaliperPaintFinish,
   CaliperPaintScope,
@@ -22,6 +28,8 @@ import type {
   ChromeDeleteFinish,
   ChromeDeleteScope,
   DraftSelectionState,
+  FreeArtworkDraftState,
+  FreeArtworkItem,
   LayeredSurfaceState,
   LightTintConfig,
   LightTintScope,
@@ -63,6 +71,15 @@ const DEFAULT_POWDER_COAT_CONFIG: PowderCoatConfig = {
   color: '#2d3135',
   finish: 'satin',
 }
+
+const DEFAULT_ARTWORK_PLACE_SIZE = 0.68
+const DEFAULT_ARTWORK_FILL_SCALE = 1
+const DEFAULT_ARTWORK_ASPECT_RATIO = 1
+const DEFAULT_FREE_ARTWORK_SCALE = 1.05
+const DEFAULT_FREE_ARTWORK_POSITION: ArtworkVector3 = [0, 0, 0]
+const DEFAULT_FREE_ARTWORK_QUATERNION: ArtworkVector4 = [0, 0, 0, 1]
+let artworkIdCounter = 0
+let freeArtworkIdCounter = 0
 
 export type ConfiguratorState = {
   appliedDesign: AppliedDesignState
@@ -123,6 +140,37 @@ export type ConfiguratorAction =
       scope: PowderCoatScope
     }
   | {
+      type: 'update-artwork-draft'
+      patch: Partial<ArtworkDraftState>
+    }
+  | {
+      type: 'update-free-artwork-upload'
+      patch: Partial<FreeArtworkDraftState>
+    }
+  | {
+      type: 'add-free-artwork'
+    }
+  | {
+      type: 'select-free-artwork'
+      artworkId: string
+    }
+  | {
+      type: 'update-free-artwork-item'
+      artworkId: string
+      patch: Partial<FreeArtworkItem>
+    }
+  | {
+      type: 'duplicate-free-artwork'
+      artworkId: string
+    }
+  | {
+      type: 'delete-free-artwork'
+      artworkId: string
+    }
+  | {
+      type: 'delete-all-free-artwork'
+    }
+  | {
       type: 'clear-service'
     }
   | {
@@ -164,6 +212,15 @@ export type ConfiguratorAction =
       scope: PowderCoatScope
     }
   | {
+      type: 'remove-artwork'
+      targetId: SelectionTargetId
+      artworkId: string
+    }
+  | {
+      type: 'remove-all-artwork'
+      targetId: SelectionTargetId
+    }
+  | {
       type: 'reset-all-wraps'
     }
 
@@ -175,7 +232,7 @@ function createLayeredSurfaceState(): LayeredSurfaceState {
     chromeDelete: null,
     caliperPaint: null,
     powderCoat: null,
-    artwork: null,
+    artwork: [],
     ppf: null,
     ceramic: null,
     services: {},
@@ -220,13 +277,6 @@ function applyServiceToSurface(
     return {
       ...surfaceState,
       powderCoat: DEFAULT_POWDER_COAT_CONFIG,
-    }
-  }
-
-  if (serviceId === 'artwork') {
-    return {
-      ...surfaceState,
-      artwork: appliedService,
     }
   }
 
@@ -367,6 +417,35 @@ function clearPowderCoatFromSurface(
   }
 }
 
+function appendArtworkToSurface(
+  surfaceState: LayeredSurfaceState,
+  artwork: ArtworkPlacement,
+): LayeredSurfaceState {
+  return {
+    ...surfaceState,
+    artwork: [...surfaceState.artwork, artwork],
+  }
+}
+
+function removeArtworkFromSurface(
+  surfaceState: LayeredSurfaceState,
+  artworkId: string,
+): LayeredSurfaceState {
+  return {
+    ...surfaceState,
+    artwork: surfaceState.artwork.filter((artwork) => artwork.id !== artworkId),
+  }
+}
+
+function clearArtworkFromSurface(
+  surfaceState: LayeredSurfaceState,
+): LayeredSurfaceState {
+  return {
+    ...surfaceState,
+    artwork: [],
+  }
+}
+
 function getAppliedWrapForTarget(
   appliedDesign: AppliedDesignState,
   targetId: SelectionTargetId,
@@ -478,6 +557,46 @@ function createPowderCoatDraft(
   )
 }
 
+function createArtworkId(): string {
+  artworkIdCounter += 1
+  return `artwork-${Date.now()}-${artworkIdCounter}`
+}
+
+function createFreeArtworkId(): string {
+  freeArtworkIdCounter += 1
+  return `free-art-${Date.now()}-${freeArtworkIdCounter}`
+}
+
+function createArtworkDraft(
+  appliedDesign: AppliedDesignState,
+  targetId: SelectionTargetId,
+): ArtworkDraftState | null {
+  if (!isArtworkTarget(targetId)) {
+    return null
+  }
+
+  const appliedArtwork = appliedDesign.parts[targetId]?.artwork ?? []
+  const selectedArtwork = appliedArtwork.at(-1) ?? null
+
+  return {
+    id: createArtworkId(),
+    targetPartId: targetId,
+    mode: 'place',
+    imageSource: null,
+    fileName: '',
+    imageWidth: 0,
+    imageHeight: 0,
+    aspectRatio: DEFAULT_ARTWORK_ASPECT_RATIO,
+    lowResolution: false,
+    error: null,
+    selectedArtworkId: selectedArtwork?.id ?? null,
+    scale: DEFAULT_ARTWORK_PLACE_SIZE,
+    rotation: 0,
+    offsetX: 0,
+    offsetY: 0,
+  }
+}
+
 function updateWrapDraft(
   currentWrap: WrapConfig,
   patch: Partial<WrapConfig>,
@@ -554,8 +673,63 @@ function updatePowderCoatDraft(
   }
 }
 
+function updateArtworkDraft(
+  currentArtwork: ArtworkDraftState,
+  patch: Partial<ArtworkDraftState>,
+): ArtworkDraftState {
+  const mode = isArtworkMode(patch.mode) ? patch.mode : currentArtwork.mode
+  const imageWidth = clampArtworkImageDimension(
+    patch.imageWidth ?? currentArtwork.imageWidth,
+  )
+  const imageHeight = clampArtworkImageDimension(
+    patch.imageHeight ?? currentArtwork.imageHeight,
+  )
+  const aspectRatio = clampArtworkAspectRatio(
+    patch.aspectRatio ?? currentArtwork.aspectRatio,
+    imageWidth,
+    imageHeight,
+  )
+  const nextScale = clampArtworkScale(patch.scale ?? currentArtwork.scale, mode)
+
+  return {
+    ...currentArtwork,
+    imageSource:
+      patch.imageSource === undefined
+        ? currentArtwork.imageSource
+        : patch.imageSource,
+    fileName: patch.fileName ?? currentArtwork.fileName,
+    imageWidth,
+    imageHeight,
+    aspectRatio,
+    lowResolution: patch.lowResolution ?? currentArtwork.lowResolution,
+    error: patch.error === undefined ? currentArtwork.error : patch.error,
+    selectedArtworkId:
+      patch.selectedArtworkId === undefined
+        ? currentArtwork.selectedArtworkId
+        : patch.selectedArtworkId,
+    mode,
+    position: patch.position ?? currentArtwork.position,
+    orientation: patch.orientation ?? currentArtwork.orientation,
+    size:
+      patch.size ??
+      (mode === 'place'
+        ? getArtworkSizeVector(nextScale, aspectRatio)
+        : currentArtwork.size),
+    scale: nextScale,
+    rotation: clampArtworkRotation(
+      patch.rotation ?? currentArtwork.rotation,
+    ),
+    offsetX: clampArtworkOffset(patch.offsetX ?? currentArtwork.offsetX),
+    offsetY: clampArtworkOffset(patch.offsetY ?? currentArtwork.offsetY),
+  }
+}
+
 function isWrapFinish(finish: WrapFinish | undefined): finish is WrapFinish {
   return finish === 'gloss' || finish === 'satin' || finish === 'matte'
+}
+
+function isArtworkMode(mode: ArtworkMode | undefined): mode is ArtworkMode {
+  return mode === 'place' || mode === 'fill'
 }
 
 function isChromeDeleteFinish(
@@ -590,6 +764,327 @@ function clampLightTintDarkness(darkness: number): number {
   }
 
   return Math.min(100, Math.max(0, Math.round(darkness)))
+}
+
+function clampArtworkImageDimension(dimension: number): number {
+  if (!Number.isFinite(dimension)) {
+    return 0
+  }
+
+  return Math.max(0, Math.round(dimension))
+}
+
+function clampArtworkAspectRatio(
+  aspectRatio: number,
+  imageWidth: number,
+  imageHeight: number,
+): number {
+  if (imageWidth > 0 && imageHeight > 0) {
+    return imageWidth / imageHeight
+  }
+
+  if (!Number.isFinite(aspectRatio) || aspectRatio <= 0) {
+    return DEFAULT_ARTWORK_ASPECT_RATIO
+  }
+
+  return Math.min(20, Math.max(0.05, aspectRatio))
+}
+
+function clampArtworkScale(scale: number, mode: ArtworkMode): number {
+  const defaultScale =
+    mode === 'fill' ? DEFAULT_ARTWORK_FILL_SCALE : DEFAULT_ARTWORK_PLACE_SIZE
+
+  if (!Number.isFinite(scale)) {
+    return defaultScale
+  }
+
+  if (mode === 'fill') {
+    return Math.min(4, Math.max(1, scale))
+  }
+
+  return Math.min(2.2, Math.max(0.12, scale))
+}
+
+function clampArtworkRotation(rotation: number): number {
+  if (!Number.isFinite(rotation)) {
+    return 0
+  }
+
+  return Math.min(180, Math.max(-180, rotation))
+}
+
+function clampArtworkOffset(offset: number): number {
+  if (!Number.isFinite(offset)) {
+    return 0
+  }
+
+  return Math.min(1, Math.max(-1, offset))
+}
+
+function getArtworkSizeVector(
+  scale: number,
+  aspectRatio: number,
+): ArtworkVector3 {
+  const safeAspectRatio = clampArtworkAspectRatio(aspectRatio, 0, 0)
+  const width =
+    safeAspectRatio >= 1 ? scale : Math.max(0.01, scale * safeAspectRatio)
+  const height =
+    safeAspectRatio >= 1 ? Math.max(0.01, scale / safeAspectRatio) : scale
+  const depth = Math.max(0.08, Math.max(width, height) * 0.45)
+
+  return [width, height, depth] as const
+}
+
+function buildArtworkPlacement(
+  artworkDraft: ArtworkDraftState,
+): ArtworkPlacement | null {
+  if (!artworkDraft.imageSource) {
+    return null
+  }
+
+  const size: ArtworkVector3 = getArtworkSizeVector(
+    artworkDraft.scale,
+    artworkDraft.aspectRatio,
+  )
+
+  return {
+    id: artworkDraft.id,
+    targetPartId: artworkDraft.targetPartId,
+    mode: artworkDraft.mode,
+    imageSource: artworkDraft.imageSource,
+    fileName: artworkDraft.fileName,
+    imageWidth: artworkDraft.imageWidth,
+    imageHeight: artworkDraft.imageHeight,
+    aspectRatio: clampArtworkAspectRatio(
+      artworkDraft.aspectRatio,
+      artworkDraft.imageWidth,
+      artworkDraft.imageHeight,
+    ),
+    position: artworkDraft.position,
+    orientation: artworkDraft.orientation,
+    size,
+    scale: artworkDraft.scale,
+    rotation: artworkDraft.rotation,
+    offsetX: artworkDraft.offsetX,
+    offsetY: artworkDraft.offsetY,
+  }
+}
+
+function createFreeArtworkDraft(
+  appliedDesign: AppliedDesignState,
+): FreeArtworkDraftState {
+  const appliedItems = [...appliedDesign.freeArtwork].sort(
+    (first, second) => first.layerOrder - second.layerOrder,
+  )
+  const selectedItem = appliedItems.at(-1) ?? null
+
+  return {
+    items: appliedItems,
+    selectedItemId: selectedItem?.id ?? null,
+    pendingImageSource: null,
+    pendingFileName: '',
+    pendingImageWidth: 0,
+    pendingImageHeight: 0,
+    pendingAspectRatio: DEFAULT_ARTWORK_ASPECT_RATIO,
+    lowResolution: false,
+    error: null,
+  }
+}
+
+function updateFreeArtworkUpload(
+  draft: FreeArtworkDraftState,
+  patch: Partial<FreeArtworkDraftState>,
+): FreeArtworkDraftState {
+  const imageWidth = clampArtworkImageDimension(
+    patch.pendingImageWidth ?? draft.pendingImageWidth,
+  )
+  const imageHeight = clampArtworkImageDimension(
+    patch.pendingImageHeight ?? draft.pendingImageHeight,
+  )
+  const aspectRatio = clampArtworkAspectRatio(
+    patch.pendingAspectRatio ?? draft.pendingAspectRatio,
+    imageWidth,
+    imageHeight,
+  )
+
+  return {
+    ...draft,
+    pendingImageSource:
+      patch.pendingImageSource === undefined
+        ? draft.pendingImageSource
+        : patch.pendingImageSource,
+    pendingFileName: patch.pendingFileName ?? draft.pendingFileName,
+    pendingImageWidth: imageWidth,
+    pendingImageHeight: imageHeight,
+    pendingAspectRatio: aspectRatio,
+    lowResolution: patch.lowResolution ?? draft.lowResolution,
+    error: patch.error === undefined ? draft.error : patch.error,
+  }
+}
+
+function getNextFreeArtworkLayerOrder(
+  items: readonly FreeArtworkItem[],
+): number {
+  return (
+    items.reduce(
+      (highestLayerOrder, item) =>
+        Math.max(highestLayerOrder, item.layerOrder),
+      -1,
+    ) + 1
+  )
+}
+
+function clampFreeArtworkScale(scale: number): number {
+  if (!Number.isFinite(scale)) {
+    return DEFAULT_FREE_ARTWORK_SCALE
+  }
+
+  return Math.min(5, Math.max(0.16, scale))
+}
+
+function normalizeFreeArtworkItem(item: FreeArtworkItem): FreeArtworkItem {
+  return {
+    ...item,
+    imageWidth: clampArtworkImageDimension(item.imageWidth),
+    imageHeight: clampArtworkImageDimension(item.imageHeight),
+    aspectRatio: clampArtworkAspectRatio(
+      item.aspectRatio,
+      item.imageWidth,
+      item.imageHeight,
+    ),
+    uniformScale: clampFreeArtworkScale(item.uniformScale),
+    rotation: clampArtworkRotation(item.rotation),
+    visible: item.visible,
+    locked: item.locked,
+    layerOrder: Number.isFinite(item.layerOrder)
+      ? Math.max(0, Math.round(item.layerOrder))
+      : 0,
+  }
+}
+
+function addPendingFreeArtwork(
+  draft: FreeArtworkDraftState,
+): FreeArtworkDraftState {
+  if (!draft.pendingImageSource) {
+    return draft
+  }
+
+  const item: FreeArtworkItem = normalizeFreeArtworkItem({
+    id: createFreeArtworkId(),
+    imageSource: draft.pendingImageSource,
+    fileName: draft.pendingFileName,
+    imageWidth: draft.pendingImageWidth,
+    imageHeight: draft.pendingImageHeight,
+    aspectRatio: draft.pendingAspectRatio,
+    projectorPosition: DEFAULT_FREE_ARTWORK_POSITION,
+    projectorQuaternion: DEFAULT_FREE_ARTWORK_QUATERNION,
+    uniformScale: DEFAULT_FREE_ARTWORK_SCALE,
+    rotation: 0,
+    visible: true,
+    locked: false,
+    layerOrder: getNextFreeArtworkLayerOrder(draft.items),
+  })
+
+  return {
+    ...draft,
+    items: [...draft.items, item],
+    selectedItemId: item.id,
+    pendingImageSource: null,
+    pendingFileName: '',
+    pendingImageWidth: 0,
+    pendingImageHeight: 0,
+    pendingAspectRatio: DEFAULT_ARTWORK_ASPECT_RATIO,
+    lowResolution: false,
+    error: null,
+  }
+}
+
+function selectFreeArtwork(
+  draft: FreeArtworkDraftState,
+  artworkId: string,
+): FreeArtworkDraftState {
+  if (!draft.items.some((item) => item.id === artworkId)) {
+    return draft
+  }
+
+  return {
+    ...draft,
+    selectedItemId: artworkId,
+  }
+}
+
+function updateFreeArtworkItem(
+  draft: FreeArtworkDraftState,
+  artworkId: string,
+  patch: Partial<FreeArtworkItem>,
+): FreeArtworkDraftState {
+  return {
+    ...draft,
+    items: draft.items.map((item) =>
+      item.id === artworkId
+        ? normalizeFreeArtworkItem({
+            ...item,
+            ...patch,
+          })
+        : item,
+    ),
+    selectedItemId: artworkId,
+  }
+}
+
+function duplicateFreeArtwork(
+  draft: FreeArtworkDraftState,
+  artworkId: string,
+): FreeArtworkDraftState {
+  const sourceItem = draft.items.find((item) => item.id === artworkId)
+
+  if (!sourceItem) {
+    return draft
+  }
+
+  const duplicatedItem = normalizeFreeArtworkItem({
+    ...sourceItem,
+    id: createFreeArtworkId(),
+    projectorPosition: [
+      sourceItem.projectorPosition[0] + 0.06,
+      sourceItem.projectorPosition[1] + 0.04,
+      sourceItem.projectorPosition[2],
+    ],
+    layerOrder: getNextFreeArtworkLayerOrder(draft.items),
+  })
+
+  return {
+    ...draft,
+    items: [...draft.items, duplicatedItem],
+    selectedItemId: duplicatedItem.id,
+  }
+}
+
+function deleteFreeArtwork(
+  draft: FreeArtworkDraftState,
+  artworkId: string,
+): FreeArtworkDraftState {
+  const items = draft.items.filter((item) => item.id !== artworkId)
+  const selectedItemId =
+    draft.selectedItemId === artworkId
+      ? items.at(-1)?.id ?? null
+      : draft.selectedItemId
+
+  return {
+    ...draft,
+    items,
+    selectedItemId,
+  }
+}
+
+function deleteAllFreeArtwork(
+  draft: FreeArtworkDraftState,
+): FreeArtworkDraftState {
+  return {
+    ...draft,
+    items: [],
+    selectedItemId: null,
+  }
 }
 
 function clearFullBodyPartWraps(
@@ -797,6 +1292,7 @@ function clearPowderCoatForTargetIds(
 export const initialConfiguratorState: ConfiguratorState = {
   appliedDesign: {
     fullBody: createLayeredSurfaceState(),
+    freeArtwork: [],
     parts: {},
   },
   draftSelection: null,
@@ -829,6 +1325,8 @@ export function configuratorReducer(
         caliperPaintScope: null,
         powderCoatConfig: null,
         powderCoatScope: null,
+        artworkConfig: null,
+        freeArtworkConfig: null,
       },
     }
   }
@@ -894,6 +1392,26 @@ export function configuratorReducer(
             state.draftSelection.targetId,
           )
         : null
+    const artworkConfig =
+      action.serviceId === 'artwork'
+        ? createArtworkDraft(
+            state.appliedDesign,
+            state.draftSelection.targetId,
+          )
+        : null
+    const freeArtworkConfig =
+      action.serviceId === 'free-art' &&
+      state.draftSelection.targetId === FULL_BODY_TARGET_ID
+        ? createFreeArtworkDraft(state.appliedDesign)
+        : null
+
+    if (action.serviceId === 'artwork' && !artworkConfig) {
+      return state
+    }
+
+    if (action.serviceId === 'free-art' && !freeArtworkConfig) {
+      return state
+    }
 
     return {
       ...state,
@@ -911,6 +1429,8 @@ export function configuratorReducer(
         caliperPaintScope: defaultCaliperPaintScope,
         powderCoatConfig,
         powderCoatScope: defaultPowderCoatScope,
+        artworkConfig,
+        freeArtworkConfig,
       },
     }
   }
@@ -1172,6 +1692,183 @@ export function configuratorReducer(
     }
   }
 
+  if (action.type === 'update-artwork-draft') {
+    const draftSelection = state.draftSelection
+
+    if (draftSelection?.serviceId !== 'artwork') {
+      return state
+    }
+
+    const currentArtwork =
+      draftSelection.artworkConfig ??
+      createArtworkDraft(state.appliedDesign, draftSelection.targetId)
+
+    if (!currentArtwork) {
+      return state
+    }
+
+    return {
+      ...state,
+      draftSelection: {
+        ...draftSelection,
+        artworkConfig: updateArtworkDraft(currentArtwork, action.patch),
+      },
+    }
+  }
+
+  if (action.type === 'update-free-artwork-upload') {
+    const draftSelection = state.draftSelection
+
+    if (
+      draftSelection?.serviceId !== 'free-art' ||
+      !draftSelection.freeArtworkConfig
+    ) {
+      return state
+    }
+
+    return {
+      ...state,
+      draftSelection: {
+        ...draftSelection,
+        freeArtworkConfig: updateFreeArtworkUpload(
+          draftSelection.freeArtworkConfig,
+          action.patch,
+        ),
+      },
+    }
+  }
+
+  if (action.type === 'add-free-artwork') {
+    const draftSelection = state.draftSelection
+
+    if (
+      draftSelection?.serviceId !== 'free-art' ||
+      !draftSelection.freeArtworkConfig
+    ) {
+      return state
+    }
+
+    return {
+      ...state,
+      draftSelection: {
+        ...draftSelection,
+        freeArtworkConfig: addPendingFreeArtwork(
+          draftSelection.freeArtworkConfig,
+        ),
+      },
+    }
+  }
+
+  if (action.type === 'select-free-artwork') {
+    const draftSelection = state.draftSelection
+
+    if (
+      draftSelection?.serviceId !== 'free-art' ||
+      !draftSelection.freeArtworkConfig
+    ) {
+      return state
+    }
+
+    return {
+      ...state,
+      draftSelection: {
+        ...draftSelection,
+        freeArtworkConfig: selectFreeArtwork(
+          draftSelection.freeArtworkConfig,
+          action.artworkId,
+        ),
+      },
+    }
+  }
+
+  if (action.type === 'update-free-artwork-item') {
+    const draftSelection = state.draftSelection
+
+    if (
+      draftSelection?.serviceId !== 'free-art' ||
+      !draftSelection.freeArtworkConfig
+    ) {
+      return state
+    }
+
+    return {
+      ...state,
+      draftSelection: {
+        ...draftSelection,
+        freeArtworkConfig: updateFreeArtworkItem(
+          draftSelection.freeArtworkConfig,
+          action.artworkId,
+          action.patch,
+        ),
+      },
+    }
+  }
+
+  if (action.type === 'duplicate-free-artwork') {
+    const draftSelection = state.draftSelection
+
+    if (
+      draftSelection?.serviceId !== 'free-art' ||
+      !draftSelection.freeArtworkConfig
+    ) {
+      return state
+    }
+
+    return {
+      ...state,
+      draftSelection: {
+        ...draftSelection,
+        freeArtworkConfig: duplicateFreeArtwork(
+          draftSelection.freeArtworkConfig,
+          action.artworkId,
+        ),
+      },
+    }
+  }
+
+  if (action.type === 'delete-free-artwork') {
+    const draftSelection = state.draftSelection
+
+    if (
+      draftSelection?.serviceId !== 'free-art' ||
+      !draftSelection.freeArtworkConfig
+    ) {
+      return state
+    }
+
+    return {
+      ...state,
+      draftSelection: {
+        ...draftSelection,
+        freeArtworkConfig: deleteFreeArtwork(
+          draftSelection.freeArtworkConfig,
+          action.artworkId,
+        ),
+      },
+    }
+  }
+
+  if (action.type === 'delete-all-free-artwork') {
+    const draftSelection = state.draftSelection
+
+    if (
+      draftSelection?.serviceId !== 'free-art' ||
+      !draftSelection.freeArtworkConfig
+    ) {
+      return state
+    }
+
+    return {
+      ...state,
+      draftSelection: {
+        ...draftSelection,
+        freeArtworkConfig: deleteAllFreeArtwork(
+          draftSelection.freeArtworkConfig,
+        ),
+      },
+    }
+  }
+
   if (action.type === 'clear-service') {
     if (!state.draftSelection) {
       return state
@@ -1193,6 +1890,8 @@ export function configuratorReducer(
         caliperPaintScope: null,
         powderCoatConfig: null,
         powderCoatScope: null,
+        artworkConfig: null,
+        freeArtworkConfig: null,
       },
     }
   }
@@ -1383,6 +2082,59 @@ export function configuratorReducer(
             state.appliedDesign.parts,
             powderCoatTargetIds,
             draftSelection.powderCoatConfig,
+          ),
+        },
+        draftSelection: null,
+      }
+    }
+
+    if (draftSelection.serviceId === 'artwork') {
+      if (!isArtworkTarget(draftSelection.targetId)) {
+        return state
+      }
+
+      const artworkPlacement = draftSelection.artworkConfig
+        ? buildArtworkPlacement(draftSelection.artworkConfig)
+        : null
+
+      if (!artworkPlacement) {
+        return state
+      }
+
+      const currentPartState =
+        state.appliedDesign.parts[draftSelection.targetId] ??
+        createLayeredSurfaceState()
+
+      return {
+        ...state,
+        appliedDesign: {
+          ...state.appliedDesign,
+          parts: {
+            ...state.appliedDesign.parts,
+            [draftSelection.targetId]: appendArtworkToSurface(
+              currentPartState,
+              artworkPlacement,
+            ),
+          },
+        },
+        draftSelection: null,
+      }
+    }
+
+    if (draftSelection.serviceId === 'free-art') {
+      if (
+        draftSelection.targetId !== FULL_BODY_TARGET_ID ||
+        !draftSelection.freeArtworkConfig
+      ) {
+        return state
+      }
+
+      return {
+        ...state,
+        appliedDesign: {
+          ...state.appliedDesign,
+          freeArtwork: [...draftSelection.freeArtworkConfig.items].sort(
+            (first, second) => first.layerOrder - second.layerOrder,
           ),
         },
         draftSelection: null,
@@ -1583,6 +2335,51 @@ export function configuratorReducer(
           state.appliedDesign.parts,
           powderCoatTargetIds,
         ),
+      },
+      draftSelection: null,
+    }
+  }
+
+  if (action.type === 'remove-artwork') {
+    if (!isArtworkTarget(action.targetId)) {
+      return state
+    }
+
+    const currentPartState =
+      state.appliedDesign.parts[action.targetId] ?? createLayeredSurfaceState()
+
+    return {
+      ...state,
+      appliedDesign: {
+        ...state.appliedDesign,
+        parts: {
+          ...state.appliedDesign.parts,
+          [action.targetId]: removeArtworkFromSurface(
+            currentPartState,
+            action.artworkId,
+          ),
+        },
+      },
+      draftSelection: null,
+    }
+  }
+
+  if (action.type === 'remove-all-artwork') {
+    if (!isArtworkTarget(action.targetId)) {
+      return state
+    }
+
+    const currentPartState =
+      state.appliedDesign.parts[action.targetId] ?? createLayeredSurfaceState()
+
+    return {
+      ...state,
+      appliedDesign: {
+        ...state.appliedDesign,
+        parts: {
+          ...state.appliedDesign.parts,
+          [action.targetId]: clearArtworkFromSurface(currentPartState),
+        },
       },
       draftSelection: null,
     }

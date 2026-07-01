@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
 } from 'react'
 import { Bounds, OrbitControls, useProgress } from '@react-three/drei'
@@ -14,8 +15,12 @@ import { S4Model } from './S4Model'
 import { ViewerErrorBoundary } from './ViewerErrorBoundary'
 import type {
   AppliedDesignState,
+  ArtworkDraftState,
+  ArtworkPreviewState,
   CaliperPaintPreviewState,
   ChromeDeletePreviewState,
+  FreeArtworkItem,
+  FreeArtworkPreviewState,
   LightTintPreviewState,
   PowderCoatPreviewState,
   TintPreviewState,
@@ -26,6 +31,19 @@ import './VehicleViewer.css'
 const INITIAL_VIEW_SAVE_DELAY_MS = 1100
 const MIN_POLAR_ANGLE = 0.01
 const MAX_POLAR_ANGLE = Math.PI - 0.01
+const desktopDprRange: [number, number] = [1, 1.5]
+const mobileDprRange: [number, number] = [1, 1.25]
+
+function getViewerDprRange(): [number, number] {
+  if (
+    typeof window !== 'undefined' &&
+    window.matchMedia('(pointer: coarse)').matches
+  ) {
+    return mobileDprRange
+  }
+
+  return desktopDprRange
+}
 
 export type VehicleViewerHandle = {
   resetView: () => void
@@ -33,13 +51,20 @@ export type VehicleViewerHandle = {
 
 type VehicleViewerProps = {
   appliedDesign: AppliedDesignState
+  artworkPreview: ArtworkPreviewState | null
   caliperPaintPreview: CaliperPaintPreviewState | null
   chromeDeletePreview: ChromeDeletePreviewState | null
+  freeArtworkPreview: FreeArtworkPreviewState | null
   lightTintPreview: LightTintPreviewState | null
   powderCoatPreview: PowderCoatPreviewState | null
   selectedTargetId: string | null
   tintPreview: TintPreviewState | null
   wrapPreview: WrapPreviewState | null
+  onArtworkPreviewTransformChange: (patch: Partial<ArtworkDraftState>) => void
+  onFreeArtworkTransformChange: (
+    artworkId: string,
+    patch: Partial<FreeArtworkItem>,
+  ) => void
   onPartSelect: (partId: string) => void
   onScenePointerMissed: () => void
 }
@@ -135,8 +160,10 @@ function InitialViewState({ controlsRef, onResetReady }: InitialViewStateProps) 
 
 type ViewerSceneProps = {
   appliedDesign: AppliedDesignState
+  artworkPreview: ArtworkPreviewState | null
   caliperPaintPreview: CaliperPaintPreviewState | null
   chromeDeletePreview: ChromeDeletePreviewState | null
+  freeArtworkPreview: FreeArtworkPreviewState | null
   lightTintPreview: LightTintPreviewState | null
   powderCoatPreview: PowderCoatPreviewState | null
   onResetReady: (resetView: () => void) => void
@@ -145,12 +172,19 @@ type ViewerSceneProps = {
   selectedTargetId: string | null
   tintPreview: TintPreviewState | null
   wrapPreview: WrapPreviewState | null
+  onArtworkPreviewTransformChange: (patch: Partial<ArtworkDraftState>) => void
+  onFreeArtworkTransformChange: (
+    artworkId: string,
+    patch: Partial<FreeArtworkItem>,
+  ) => void
 }
 
 function ViewerScene({
   appliedDesign,
+  artworkPreview,
   caliperPaintPreview,
   chromeDeletePreview,
+  freeArtworkPreview,
   lightTintPreview,
   powderCoatPreview,
   onPartSelect,
@@ -159,6 +193,8 @@ function ViewerScene({
   selectedTargetId,
   tintPreview,
   wrapPreview,
+  onArtworkPreviewTransformChange,
+  onFreeArtworkTransformChange,
 }: ViewerSceneProps) {
   const controlsRef = useRef<OrbitControlsImpl | null>(null)
 
@@ -193,14 +229,18 @@ function ViewerScene({
           <InitialViewState controlsRef={controlsRef} onResetReady={onResetReady} />
           <S4Model
             appliedDesign={appliedDesign}
+            artworkPreview={artworkPreview}
             caliperPaintPreview={caliperPaintPreview}
             chromeDeletePreview={chromeDeletePreview}
             controlsRef={controlsRef}
+            freeArtworkPreview={freeArtworkPreview}
             lightTintPreview={lightTintPreview}
             powderCoatPreview={powderCoatPreview}
             selectedTargetId={selectedTargetId}
             tintPreview={tintPreview}
             wrapPreview={wrapPreview}
+            onArtworkPreviewTransformChange={onArtworkPreviewTransformChange}
+            onFreeArtworkTransformChange={onFreeArtworkTransformChange}
             onPartSelect={onPartSelect}
             onSelectionClear={onScenePointerMissed}
           />
@@ -214,8 +254,10 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
   function VehicleViewer(
     {
       appliedDesign,
+      artworkPreview,
       caliperPaintPreview,
       chromeDeletePreview,
+      freeArtworkPreview,
       lightTintPreview,
       powderCoatPreview,
       onPartSelect,
@@ -223,10 +265,13 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
       selectedTargetId,
       tintPreview,
       wrapPreview,
+      onArtworkPreviewTransformChange,
+      onFreeArtworkTransformChange,
     },
     ref,
   ) {
   const resetViewRef = useRef<() => void>(() => undefined)
+  const viewerDprRange = useMemo(() => getViewerDprRange(), [])
 
   const handleResetReady = useCallback((resetView: () => void) => {
     resetViewRef.current = resetView
@@ -258,19 +303,24 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
           aria-hidden="true"
           camera={{ fov: 35, near: 0.1, far: 100, position: [5.4, 2.7, 6.2] }}
           className="vehicle-viewer-canvas"
-          dpr={[1, 2]}
+          dpr={viewerDprRange}
+          frameloop="demand"
           gl={{ antialias: true, powerPreference: 'high-performance' }}
           shadows="percentage"
         >
           <ViewerScene
             appliedDesign={appliedDesign}
+            artworkPreview={artworkPreview}
             caliperPaintPreview={caliperPaintPreview}
             chromeDeletePreview={chromeDeletePreview}
+            freeArtworkPreview={freeArtworkPreview}
             lightTintPreview={lightTintPreview}
             powderCoatPreview={powderCoatPreview}
             selectedTargetId={selectedTargetId}
             tintPreview={tintPreview}
             wrapPreview={wrapPreview}
+            onArtworkPreviewTransformChange={onArtworkPreviewTransformChange}
+            onFreeArtworkTransformChange={onFreeArtworkTransformChange}
             onPartSelect={onPartSelect}
             onScenePointerMissed={onScenePointerMissed}
             onResetReady={handleResetReady}

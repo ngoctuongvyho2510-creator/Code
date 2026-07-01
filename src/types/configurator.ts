@@ -1,6 +1,7 @@
 export type ServiceId =
   | 'wrap'
   | 'artwork'
+  | 'free-art'
   | 'ppf'
   | 'ceramic'
   | 'chrome-delete'
@@ -131,6 +132,78 @@ export type PowderCoatConfig = {
   finish: PowderCoatFinish
 }
 
+export type ArtworkMode = 'place' | 'fill'
+
+export type ArtworkVector3 = readonly [number, number, number]
+export type ArtworkVector4 = readonly [number, number, number, number]
+
+export type ArtworkPlacement = {
+  id: string
+  targetPartId: SelectionTargetId
+  mode: ArtworkMode
+  imageSource: string
+  fileName: string
+  imageWidth: number
+  imageHeight: number
+  aspectRatio: number
+  position?: ArtworkVector3
+  orientation?: ArtworkVector3
+  size?: ArtworkVector3
+  scale: number
+  rotation: number
+  offsetX?: number
+  offsetY?: number
+}
+
+export type ArtworkDraftState = {
+  id: string
+  targetPartId: SelectionTargetId
+  mode: ArtworkMode
+  imageSource: string | null
+  fileName: string
+  imageWidth: number
+  imageHeight: number
+  aspectRatio: number
+  lowResolution: boolean
+  error: string | null
+  selectedArtworkId: string | null
+  position?: ArtworkVector3
+  orientation?: ArtworkVector3
+  size?: ArtworkVector3
+  scale: number
+  rotation: number
+  offsetX: number
+  offsetY: number
+}
+
+export type FreeArtworkItem = {
+  id: string
+  imageSource: string
+  fileName: string
+  imageWidth: number
+  imageHeight: number
+  aspectRatio: number
+  projectorPosition: ArtworkVector3
+  projectorQuaternion: ArtworkVector4
+  uniformScale: number
+  rotation: number
+  visible: boolean
+  locked: boolean
+  layerOrder: number
+}
+
+export type FreeArtworkDraftState = {
+  items: readonly FreeArtworkItem[]
+  selectedItemId: string | null
+  pendingImageSource: string | null
+  pendingFileName: string
+  pendingImageWidth: number
+  pendingImageHeight: number
+  pendingAspectRatio: number
+  lowResolution: boolean
+  error: string | null
+}
+
 export type AppliedServiceState = {
   serviceId: ServiceId
 }
@@ -142,7 +215,7 @@ export type LayeredSurfaceState = {
   chromeDelete: ChromeDeleteConfig | null
   caliperPaint: CaliperPaintConfig | null
   powderCoat: PowderCoatConfig | null
-  artwork: AppliedServiceState | null
+  artwork: readonly ArtworkPlacement[]
   ppf: AppliedServiceState | null
   ceramic: AppliedServiceState | null
   services: Partial<Record<ServiceId, AppliedServiceState>>
@@ -150,6 +223,7 @@ export type LayeredSurfaceState = {
 
 export type AppliedDesignState = {
   fullBody: LayeredSurfaceState
+  freeArtwork: readonly FreeArtworkItem[]
   parts: Record<string, LayeredSurfaceState>
 }
 
@@ -167,6 +241,8 @@ export type DraftSelectionState = {
   caliperPaintScope: CaliperPaintScope | null
   powderCoatConfig: PowderCoatConfig | null
   powderCoatScope: PowderCoatScope | null
+  artworkConfig: ArtworkDraftState | null
+  freeArtworkConfig: FreeArtworkDraftState | null
 }
 
 export type WrapPreviewState = {
@@ -197,4 +273,14 @@ export type CaliperPaintPreviewState = {
 export type PowderCoatPreviewState = {
   targetIds: readonly SelectionTargetId[]
   powderCoat: PowderCoatConfig
+}
+
+export type ArtworkPreviewState = {
+  targetId: SelectionTargetId
+  artwork: ArtworkPlacement
+}
+
+export type FreeArtworkPreviewState = {
+  items: readonly FreeArtworkItem[]
+  selectedItemId: string | null
 }
