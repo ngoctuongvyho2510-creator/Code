@@ -16,6 +16,10 @@ import type {
   LightTintConfig,
   LightTintScope,
   LightTintScopeOption,
+  PpfConfig,
+  PpfFinish,
+  PpfScope,
+  PpfScopeOption,
   PowderCoatConfig,
   PowderCoatFinish,
   PowderCoatScope,
@@ -52,6 +56,11 @@ const powderCoatFinishOptions = [
   { id: 'satin', label: 'Satin' },
   { id: 'matte', label: 'Matte' },
 ] as const satisfies readonly { id: PowderCoatFinish; label: string }[]
+
+const ppfFinishOptions = [
+  { id: 'gloss', label: 'Gloss' },
+  { id: 'matte', label: 'Matte' },
+] as const satisfies readonly { id: PpfFinish; label: string }[]
 
 const validHexColorPattern = /^#[0-9A-F]{6}$/
 const partialHexColorPattern = /^#[0-9A-F]{0,6}$/
@@ -157,6 +166,9 @@ type PartServicePopupProps = {
   powderCoatConfig: PowderCoatConfig | null
   powderCoatScope: PowderCoatScope | null
   powderCoatScopeOptions: readonly PowderCoatScopeOption[]
+  ppfConfig: PpfConfig | null
+  ppfScope: PpfScope | null
+  ppfScopeOptions: readonly PpfScopeOption[]
   lightTintConfig: LightTintConfig | null
   lightTintScope: LightTintScope | null
   lightTintScopeOptions: readonly LightTintScopeOption[]
@@ -168,11 +180,14 @@ type PartServicePopupProps = {
   tintScope: TintScope | null
   tintScopeOptions: readonly TintScopeOption[]
   canApplyAllWraps: boolean
+  canApplyAllPpf: boolean
   canResetAllWraps: boolean
+  canResetAllPpf: boolean
   canResetCaliperPaint: boolean
   canResetChromeDelete: boolean
   canResetLightTint: boolean
   canResetPowderCoat: boolean
+  canResetPpf: boolean
   canResetTint: boolean
   canResetWrap: boolean
   canRemoveArtwork: boolean
@@ -183,10 +198,12 @@ type PartServicePopupProps = {
   onCancel: () => void
   onClose: () => void
   onResetAllWraps: () => void
+  onResetAllPpf: () => void
   onResetCaliperPaint: () => void
   onResetChromeDelete: () => void
   onResetLightTint: () => void
   onResetPowderCoat: () => void
+  onResetPpf: () => void
   onResetTint: () => void
   onResetWrap: () => void
   onRemoveArtwork: () => void
@@ -207,6 +224,8 @@ type PartServicePopupProps = {
   onUpdateCaliperPaintScope: (scope: CaliperPaintScope) => void
   onUpdatePowderCoatDraft: (patch: Partial<PowderCoatConfig>) => void
   onUpdatePowderCoatScope: (scope: PowderCoatScope) => void
+  onUpdatePpfDraft: (patch: Partial<PpfConfig>) => void
+  onUpdatePpfScope: (scope: PpfScope) => void
   onUpdateLightTintDraft: (patch: Partial<LightTintConfig>) => void
   onUpdateLightTintScope: (scope: LightTintScope) => void
   onUpdateChromeDeleteDraft: (patch: Partial<ChromeDeleteConfig>) => void
@@ -219,14 +238,17 @@ type PartServicePopupProps = {
 export function PartServicePopup({
   artworkConfig,
   freeArtworkConfig,
+  canApplyAllPpf,
   canApplyAllWraps,
   canRemoveAllArtwork,
   canRemoveArtwork,
+  canResetAllPpf,
   canResetAllWraps,
   canResetCaliperPaint,
   canResetChromeDelete,
   canResetLightTint,
   canResetPowderCoat,
+  canResetPpf,
   canResetTint,
   canResetWrap,
   caliperPaintConfig,
@@ -235,6 +257,9 @@ export function PartServicePopup({
   powderCoatConfig,
   powderCoatScope,
   powderCoatScopeOptions,
+  ppfConfig,
+  ppfScope,
+  ppfScopeOptions,
   lightTintConfig,
   lightTintScope,
   lightTintScopeOptions,
@@ -253,11 +278,13 @@ export function PartServicePopup({
   onBack,
   onCancel,
   onClose,
+  onResetAllPpf,
   onResetAllWraps,
   onResetCaliperPaint,
   onResetChromeDelete,
   onResetLightTint,
   onResetPowderCoat,
+  onResetPpf,
   onResetTint,
   onResetWrap,
   onRemoveAllArtwork,
@@ -275,6 +302,8 @@ export function PartServicePopup({
   onUpdateCaliperPaintScope,
   onUpdatePowderCoatDraft,
   onUpdatePowderCoatScope,
+  onUpdatePpfDraft,
+  onUpdatePpfScope,
   onUpdateLightTintDraft,
   onUpdateLightTintScope,
   onUpdateChromeDeleteDraft,
@@ -302,6 +331,10 @@ export function PartServicePopup({
     selectedServiceId === 'powder-coat' &&
     powderCoatConfig !== null &&
     powderCoatScope !== null
+  const showPpfEditor =
+    selectedServiceId === 'ppf' &&
+    ppfConfig !== null &&
+    (target.id === 'full-body' || ppfScope !== null)
   const showArtworkEditor =
     selectedServiceId === 'artwork' && artworkConfig !== null
   const showFreeArtEditor =
@@ -313,6 +346,7 @@ export function PartServicePopup({
     !showChromeDeleteEditor &&
     !showCaliperPaintEditor &&
     !showPowderCoatEditor &&
+    !showPpfEditor &&
     !showArtworkEditor &&
     !showFreeArtEditor
   const syncedHexValue = wrapConfig?.color.toUpperCase() ?? '#C49D59'
@@ -1088,6 +1122,46 @@ export function PartServicePopup({
         </div>
       ) : null}
 
+      {showPpfEditor && ppfConfig ? (
+        <div className="part-popup-wrap" aria-label="PPF options">
+          <div>
+            <p className="part-popup-finish-label">Finish</p>
+            <div className="part-popup-finish-grid" aria-label="Finish">
+              {ppfFinishOptions.map((finish) => (
+                <button
+                  type="button"
+                  className="part-popup-finish"
+                  data-selected={ppfConfig.finish === finish.id}
+                  key={finish.id}
+                  onClick={() => onUpdatePpfDraft({ finish: finish.id })}
+                >
+                  {finish.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {ppfScope && ppfScopeOptions.length > 0 ? (
+            <div>
+              <p className="part-popup-finish-label">Apply To</p>
+              <div className="part-popup-finish-grid" aria-label="Apply To">
+                {ppfScopeOptions.map((scope) => (
+                  <button
+                    type="button"
+                    className="part-popup-finish"
+                    data-selected={ppfScope === scope.id}
+                    key={scope.id}
+                    onClick={() => onUpdatePpfScope(scope.id)}
+                  >
+                    {scope.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       {showArtworkEditor && artworkConfig ? (
         <div className="part-popup-wrap" aria-label="Artwork options">
           <label className="part-popup-field">
@@ -1550,6 +1624,45 @@ export function PartServicePopup({
               onClick={onResetPowderCoat}
             >
               Reset
+            </button>
+          ) : null}
+          <button type="button" className="part-popup-apply" onClick={onApply}>
+            Apply
+          </button>
+        </div>
+      ) : showPpfEditor ? (
+        <div className="part-popup-actions part-popup-actions--wrap">
+          <button type="button" className="part-popup-link" onClick={onBack}>
+            Back
+          </button>
+          <button type="button" className="part-popup-link" onClick={onCancel}>
+            Cancel
+          </button>
+          {canResetPpf ? (
+            <button
+              type="button"
+              className="part-popup-link"
+              onClick={onResetPpf}
+            >
+              Reset
+            </button>
+          ) : null}
+          {canResetAllPpf ? (
+            <button
+              type="button"
+              className="part-popup-link"
+              onClick={onResetAllPpf}
+            >
+              Reset All
+            </button>
+          ) : null}
+          {canApplyAllPpf ? (
+            <button
+              type="button"
+              className="part-popup-apply"
+              onClick={onApplyAll}
+            >
+              Apply All
             </button>
           ) : null}
           <button type="button" className="part-popup-apply" onClick={onApply}>

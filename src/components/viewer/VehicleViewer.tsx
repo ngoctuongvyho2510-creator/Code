@@ -22,6 +22,7 @@ import type {
   FreeArtworkItem,
   FreeArtworkPreviewState,
   LightTintPreviewState,
+  PpfPreviewState,
   PowderCoatPreviewState,
   TintPreviewState,
   WrapPreviewState,
@@ -56,6 +57,7 @@ type VehicleViewerProps = {
   chromeDeletePreview: ChromeDeletePreviewState | null
   freeArtworkPreview: FreeArtworkPreviewState | null
   lightTintPreview: LightTintPreviewState | null
+  ppfPreview: PpfPreviewState | null
   powderCoatPreview: PowderCoatPreviewState | null
   selectedTargetId: string | null
   tintPreview: TintPreviewState | null
@@ -165,6 +167,7 @@ type ViewerSceneProps = {
   chromeDeletePreview: ChromeDeletePreviewState | null
   freeArtworkPreview: FreeArtworkPreviewState | null
   lightTintPreview: LightTintPreviewState | null
+  ppfPreview: PpfPreviewState | null
   powderCoatPreview: PowderCoatPreviewState | null
   onResetReady: (resetView: () => void) => void
   onPartSelect: (partId: string) => void
@@ -186,6 +189,7 @@ function ViewerScene({
   chromeDeletePreview,
   freeArtworkPreview,
   lightTintPreview,
+  ppfPreview,
   powderCoatPreview,
   onPartSelect,
   onResetReady,
@@ -235,6 +239,7 @@ function ViewerScene({
             controlsRef={controlsRef}
             freeArtworkPreview={freeArtworkPreview}
             lightTintPreview={lightTintPreview}
+            ppfPreview={ppfPreview}
             powderCoatPreview={powderCoatPreview}
             selectedTargetId={selectedTargetId}
             tintPreview={tintPreview}
@@ -259,6 +264,7 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
       chromeDeletePreview,
       freeArtworkPreview,
       lightTintPreview,
+      ppfPreview,
       powderCoatPreview,
       onPartSelect,
       onScenePointerMissed,
@@ -315,6 +321,7 @@ export const VehicleViewer = forwardRef<VehicleViewerHandle, VehicleViewerProps>
             chromeDeletePreview={chromeDeletePreview}
             freeArtworkPreview={freeArtworkPreview}
             lightTintPreview={lightTintPreview}
+            ppfPreview={ppfPreview}
             powderCoatPreview={powderCoatPreview}
             selectedTargetId={selectedTargetId}
             tintPreview={tintPreview}

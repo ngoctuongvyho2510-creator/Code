@@ -5,12 +5,14 @@ import {
   getCaliperPaintScopeOptions,
   getChromeDeleteScopeOptions,
   getLightTintScopeOptions,
+  getPpfScopeOptions,
   getPowderCoatScopeOptions,
   getTintScopeOptions,
   getSelectionTarget,
   resolveCaliperPaintScopeTargetIds,
   resolveChromeDeleteScopeTargetIds,
   resolveLightTintScopeTargetIds,
+  resolvePpfScopeTargetIds,
   resolvePowderCoatScopeTargetIds,
   resolveTintScopeTargetIds,
 } from './config/vehicleParts'
@@ -30,6 +32,7 @@ import type {
   FreeArtworkItem,
   FreeArtworkPreviewState,
   LightTintPreviewState,
+  PpfPreviewState,
   PowderCoatPreviewState,
   TintPreviewState,
   WrapPreviewState,
@@ -206,6 +209,41 @@ function App() {
     }
   }, [configuratorState.draftSelection])
 
+  const ppfPreview = useMemo<PpfPreviewState | null>(() => {
+    const draftSelection = configuratorState.draftSelection
+
+    if (draftSelection?.serviceId !== 'ppf' || !draftSelection.ppfConfig) {
+      return null
+    }
+
+    if (draftSelection.targetId === FULL_BODY_TARGET_ID) {
+      return {
+        fullBodyBase: true,
+        targetIds: FULL_BODY_PART_IDS,
+        ppf: draftSelection.ppfConfig,
+      }
+    }
+
+    if (!draftSelection.ppfScope) {
+      return null
+    }
+
+    const targetIds = resolvePpfScopeTargetIds(
+      draftSelection.targetId,
+      draftSelection.ppfScope,
+    )
+
+    if (targetIds.length === 0) {
+      return null
+    }
+
+    return {
+      fullBodyBase: false,
+      targetIds,
+      ppf: draftSelection.ppfConfig,
+    }
+  }, [configuratorState.draftSelection])
+
   const artworkPreview = useMemo<ArtworkPreviewState | null>(() => {
     const draftSelection = configuratorState.draftSelection
     const artworkConfig = draftSelection?.artworkConfig
@@ -259,17 +297,29 @@ function App() {
   const hasFullBodyWrapOverrides = FULL_BODY_PART_IDS.some((partId) =>
     Boolean(configuratorState.appliedDesign.parts[partId]?.wrap),
   )
+  const hasFullBodyPpfOverrides = FULL_BODY_PART_IDS.some((partId) =>
+    Boolean(configuratorState.appliedDesign.parts[partId]?.ppf),
+  )
 
   const activeTargetHasDirectWrap = activeTarget
     ? activeTarget.id === FULL_BODY_TARGET_ID
       ? Boolean(configuratorState.appliedDesign.fullBody.wrap)
       : Boolean(configuratorState.appliedDesign.parts[activeTarget.id]?.wrap)
     : false
+  const activeTargetHasDirectPpf = activeTarget
+    ? activeTarget.id === FULL_BODY_TARGET_ID
+      ? Boolean(configuratorState.appliedDesign.fullBody.ppf)
+      : Boolean(configuratorState.appliedDesign.parts[activeTarget.id]?.ppf)
+    : false
 
   const canResetAllWraps =
     activeTarget?.id === FULL_BODY_TARGET_ID &&
     (Boolean(configuratorState.appliedDesign.fullBody.wrap) ||
       hasFullBodyWrapOverrides)
+  const canResetAllPpf =
+    activeTarget?.id === FULL_BODY_TARGET_ID &&
+    (Boolean(configuratorState.appliedDesign.fullBody.ppf) ||
+      hasFullBodyPpfOverrides)
   const activeTintScope =
     configuratorState.draftSelection?.serviceId === 'tint'
       ? configuratorState.draftSelection.tintScope
@@ -305,6 +355,7 @@ function App() {
   const powderCoatScopeOptions = activeTarget
     ? getPowderCoatScopeOptions(activeTarget.id)
     : []
+  const ppfScopeOptions = activeTarget ? getPpfScopeOptions(activeTarget.id) : []
   const canResetTint =
     activeTarget && activeTintScope
       ? resolveTintScopeTargetIds(activeTarget.id, activeTintScope).some(
@@ -434,6 +485,7 @@ function App() {
             chromeDeletePreview={chromeDeletePreview}
             freeArtworkPreview={freeArtworkPreview}
             lightTintPreview={lightTintPreview}
+            ppfPreview={ppfPreview}
             powderCoatPreview={powderCoatPreview}
             ref={vehicleViewerRef}
             selectedTargetId={configuratorState.draftSelection?.targetId ?? null}
@@ -490,6 +542,9 @@ function App() {
                 configuratorState.draftSelection?.powderCoatScope ?? null
               }
               powderCoatScopeOptions={powderCoatScopeOptions}
+              ppfConfig={configuratorState.draftSelection?.ppfConfig ?? null}
+              ppfScope={configuratorState.draftSelection?.ppfScope ?? null}
+              ppfScopeOptions={ppfScopeOptions}
               artworkConfig={
                 configuratorState.draftSelection?.artworkConfig ?? null
               }
@@ -510,21 +565,32 @@ function App() {
                 activeTarget.id === FULL_BODY_TARGET_ID &&
                 hasFullBodyWrapOverrides
               }
+              canApplyAllPpf={
+                activeTarget.id === FULL_BODY_TARGET_ID &&
+                hasFullBodyPpfOverrides
+              }
               canResetAllWraps={canResetAllWraps}
+              canResetAllPpf={canResetAllPpf}
               canResetCaliperPaint={canResetCaliperPaint}
               canResetChromeDelete={canResetChromeDelete}
               canResetLightTint={canResetLightTint}
               canResetPowderCoat={canResetPowderCoat}
               canResetTint={canResetTint}
+              canResetPpf={activeTargetHasDirectPpf}
               canResetWrap={activeTargetHasDirectWrap}
               canRemoveArtwork={Boolean(activeArtworkId)}
               canRemoveAllArtwork={activeTargetArtwork.length > 0}
               onApply={() => dispatch({ type: 'apply-draft' })}
-              onApplyAll={() => dispatch({ type: 'apply-wrap-all' })}
+              onApplyAll={() =>
+                configuratorState.draftSelection?.serviceId === 'ppf'
+                  ? dispatch({ type: 'apply-ppf-all' })
+                  : dispatch({ type: 'apply-wrap-all' })
+              }
               onBack={handleBack}
               onCancel={() => dispatch({ type: 'cancel-draft' })}
               onClose={() => dispatch({ type: 'cancel-draft' })}
               onResetAllWraps={() => dispatch({ type: 'reset-all-wraps' })}
+              onResetAllPpf={() => dispatch({ type: 'reset-all-ppf' })}
               onResetCaliperPaint={() =>
                 activeCaliperPaintScope
                   ? dispatch({
@@ -569,6 +635,9 @@ function App() {
                       scope: activeTintScope,
                     })
                   : undefined
+              }
+              onResetPpf={() =>
+                dispatch({ type: 'reset-ppf', targetId: activeTarget.id })
               }
               onResetWrap={() =>
                 dispatch({ type: 'reset-wrap', targetId: activeTarget.id })
@@ -636,6 +705,12 @@ function App() {
               }
               onUpdatePowderCoatScope={(scope) =>
                 dispatch({ type: 'update-powder-coat-scope', scope })
+              }
+              onUpdatePpfDraft={(patch) =>
+                dispatch({ type: 'update-ppf-draft', patch })
+              }
+              onUpdatePpfScope={(scope) =>
+                dispatch({ type: 'update-ppf-scope', scope })
               }
               onUpdateArtworkDraft={(patch) =>
                 dispatch({ type: 'update-artwork-draft', patch })

@@ -6,6 +6,8 @@ import type {
   LightTintScope,
   LightTintScopeOption,
   PartGroup,
+  PpfScope,
+  PpfScopeOption,
   PowderCoatScope,
   PowderCoatScopeOption,
   ServiceId,
@@ -38,25 +40,23 @@ const FULL_BODY_SERVICES = [
 
 const CHROME_SERVICES = [
   'chrome-delete',
-  'ppf',
   'ceramic',
 ] as const satisfies readonly ServiceId[]
 
 const TRIM_SERVICES = [
   'wrap',
-  'ppf',
   'ceramic',
 ] as const satisfies readonly ServiceId[]
 
 const GLASS_SERVICES = ['tint', 'ceramic'] as const satisfies readonly ServiceId[]
 const BADGE_SERVICES = ['wrap', 'remove'] as const satisfies readonly ServiceId[]
-const GRILLE_SERVICES = ['wrap', 'ppf', 'ceramic'] as const satisfies readonly ServiceId[]
+const GRILLE_SERVICES = ['wrap', 'ceramic'] as const satisfies readonly ServiceId[]
 const WHEEL_SERVICES = ['powder-coat', 'ceramic'] as const satisfies readonly ServiceId[]
 const CENTER_CAP_SERVICES = ['wrap'] as const satisfies readonly ServiceId[]
 const CALIPER_SERVICES = ['caliper-paint'] as const satisfies readonly ServiceId[]
 const BRAKE_DISC_SERVICES = ['performance'] as const satisfies readonly ServiceId[]
-const LAMP_SERVICES = ['tint', 'ppf', 'ceramic'] as const satisfies readonly ServiceId[]
-const SIGNAL_SERVICES = ['tint', 'ppf'] as const satisfies readonly ServiceId[]
+const LAMP_SERVICES = ['tint', 'ceramic'] as const satisfies readonly ServiceId[]
+const SIGNAL_SERVICES = ['tint'] as const satisfies readonly ServiceId[]
 const EXHAUST_SERVICES = ['ceramic'] as const satisfies readonly ServiceId[]
 const WIPER_SERVICES = ['wrap'] as const satisfies readonly ServiceId[]
 
@@ -207,6 +207,13 @@ const lightTintScopeLabels = {
   this: 'This',
   both: 'Both',
 } as const satisfies Record<LightTintScope, string>
+
+const ppfScopeLabels = {
+  this: 'This',
+  both: 'Both',
+  'this-side': 'This Side',
+  all: 'All',
+} as const satisfies Record<PpfScope, string>
 
 const tintScopesByPartId = {
   windshield: ['this', 'all'],
@@ -487,6 +494,50 @@ export const FULL_BODY_PART_IDS = VEHICLE_PARTS.filter(
   (part) => part.fullBody && part.selectable && part.services.includes('wrap'),
 ).map((part) => part.id)
 
+export const PPF_PART_IDS = FULL_BODY_PART_IDS
+
+const LEFT_DOOR_PPF_PART_IDS = [
+  'door-front-left',
+  'door-rear-left',
+] as const
+
+const RIGHT_DOOR_PPF_PART_IDS = [
+  'door-front-right',
+  'door-rear-right',
+] as const
+
+const DOOR_PPF_PART_IDS = [
+  ...LEFT_DOOR_PPF_PART_IDS,
+  ...RIGHT_DOOR_PPF_PART_IDS,
+] as const
+
+const ppfPairPartIdsByPartId: Partial<Record<string, readonly string[]>> = {
+  'body-side-left': ['body-side-left', 'body-side-right'],
+  'body-side-right': ['body-side-left', 'body-side-right'],
+  'fender-front-left': ['fender-front-left', 'fender-front-right'],
+  'fender-front-right': ['fender-front-left', 'fender-front-right'],
+  'side-skirt-left': ['side-skirt-left', 'side-skirt-right'],
+  'side-skirt-right': ['side-skirt-left', 'side-skirt-right'],
+  'mirror-cap-left': ['mirror-cap-left', 'mirror-cap-right'],
+  'mirror-cap-right': ['mirror-cap-left', 'mirror-cap-right'],
+  'door-handle-front-left': [
+    'door-handle-front-left',
+    'door-handle-front-right',
+  ],
+  'door-handle-front-right': [
+    'door-handle-front-left',
+    'door-handle-front-right',
+  ],
+  'door-handle-rear-left': [
+    'door-handle-rear-left',
+    'door-handle-rear-right',
+  ],
+  'door-handle-rear-right': [
+    'door-handle-rear-left',
+    'door-handle-rear-right',
+  ],
+} as const satisfies Partial<Record<string, readonly string[]>>
+
 export const WRAP_CAPABLE_MESH_NAMES = VEHICLE_PARTS.filter(
   (part) => part.selectable && !part.visualOnly && part.services.includes('wrap'),
 ).flatMap((part) => part.meshNames)
@@ -520,6 +571,10 @@ export const POWDER_COAT_MESH_NAMES = POWDER_COAT_PART_IDS.flatMap(
 )
 
 export const LIGHT_TINT_MESH_NAMES = LIGHT_TINT_PART_IDS.flatMap(
+  (partId) => partById.get(partId)?.meshNames ?? [],
+)
+
+export const PPF_MESH_NAMES = PPF_PART_IDS.flatMap(
   (partId) => partById.get(partId)?.meshNames ?? [],
 )
 
@@ -702,6 +757,64 @@ export function isLightTintTarget(targetId: string): boolean {
   return LIGHT_TINT_PART_IDS.includes(
     targetId as (typeof LIGHT_TINT_PART_IDS)[number],
   )
+}
+
+export function isPpfTarget(targetId: string): boolean {
+  return targetId === FULL_BODY_TARGET_ID || PPF_PART_IDS.includes(targetId)
+}
+
+function getPpfScopesForPartId(targetId: string): readonly PpfScope[] {
+  if (!PPF_PART_IDS.includes(targetId)) {
+    return []
+  }
+
+  if ((DOOR_PPF_PART_IDS as readonly string[]).includes(targetId)) {
+    return ['this', 'this-side', 'all']
+  }
+
+  if (ppfPairPartIdsByPartId[targetId]) {
+    return ['this', 'both']
+  }
+
+  return ['this']
+}
+
+export function getDefaultPpfScope(targetId: string): PpfScope | null {
+  return getPpfScopeOptions(targetId)[0]?.id ?? null
+}
+
+export function getPpfScopeOptions(targetId: string): readonly PpfScopeOption[] {
+  return getPpfScopesForPartId(targetId).map((scope) => ({
+    id: scope,
+    label: ppfScopeLabels[scope],
+  }))
+}
+
+export function resolvePpfScopeTargetIds(
+  targetId: string,
+  scope: PpfScope,
+): readonly string[] {
+  const validScopes = getPpfScopesForPartId(targetId)
+
+  if (!validScopes.includes(scope)) {
+    return []
+  }
+
+  if (scope === 'this') {
+    return [targetId]
+  }
+
+  if (scope === 'all') {
+    return DOOR_PPF_PART_IDS
+  }
+
+  if (scope === 'this-side') {
+    return (LEFT_DOOR_PPF_PART_IDS as readonly string[]).includes(targetId)
+      ? LEFT_DOOR_PPF_PART_IDS
+      : RIGHT_DOOR_PPF_PART_IDS
+  }
+
+  return ppfPairPartIdsByPartId[targetId] ?? []
 }
 
 export function isArtworkTarget(targetId: string): boolean {
