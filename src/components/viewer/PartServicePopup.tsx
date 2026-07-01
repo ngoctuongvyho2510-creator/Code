@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { getService } from '../../config/services'
 import type {
   ArtworkDraftState,
@@ -248,7 +248,7 @@ type PartServicePopupProps = {
   onUpdateWrapDraft: (patch: Partial<WrapConfig>) => void
 }
 
-export function PartServicePopup({
+export const PartServicePopup = memo(function PartServicePopup({
   artworkConfig,
   freeArtworkConfig,
   ceramicConfig,
@@ -1871,4 +1871,4 @@ export function PartServicePopup({
       )}
     </section>
   )
-}
+})

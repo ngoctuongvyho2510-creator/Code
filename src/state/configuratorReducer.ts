@@ -873,7 +873,7 @@ function updateArtworkDraft(
   )
   const nextScale = clampArtworkScale(patch.scale ?? currentArtwork.scale, mode)
 
-  return {
+  const nextArtwork = {
     ...currentArtwork,
     imageSource:
       patch.imageSource === undefined
@@ -904,6 +904,51 @@ function updateArtworkDraft(
     offsetX: clampArtworkOffset(patch.offsetX ?? currentArtwork.offsetX),
     offsetY: clampArtworkOffset(patch.offsetY ?? currentArtwork.offsetY),
   }
+
+  return areArtworkDraftsEqual(currentArtwork, nextArtwork)
+    ? currentArtwork
+    : nextArtwork
+}
+
+function areNumberTuplesEqual(
+  first: readonly number[] | null | undefined,
+  second: readonly number[] | null | undefined,
+): boolean {
+  if (first === second) {
+    return true
+  }
+
+  if (!first || !second || first.length !== second.length) {
+    return false
+  }
+
+  return first.every((value, index) => value === second[index])
+}
+
+function areArtworkDraftsEqual(
+  first: ArtworkDraftState,
+  second: ArtworkDraftState,
+): boolean {
+  return (
+    first.id === second.id &&
+    first.targetPartId === second.targetPartId &&
+    first.mode === second.mode &&
+    first.imageSource === second.imageSource &&
+    first.fileName === second.fileName &&
+    first.imageWidth === second.imageWidth &&
+    first.imageHeight === second.imageHeight &&
+    first.aspectRatio === second.aspectRatio &&
+    first.lowResolution === second.lowResolution &&
+    first.error === second.error &&
+    first.selectedArtworkId === second.selectedArtworkId &&
+    first.scale === second.scale &&
+    first.rotation === second.rotation &&
+    first.offsetX === second.offsetX &&
+    first.offsetY === second.offsetY &&
+    areNumberTuplesEqual(first.position, second.position) &&
+    areNumberTuplesEqual(first.orientation, second.orientation) &&
+    areNumberTuplesEqual(first.size, second.size)
+  )
 }
 
 function isWrapFinish(finish: WrapFinish | undefined): finish is WrapFinish {
@@ -1093,7 +1138,7 @@ function updateFreeArtworkUpload(
     imageHeight,
   )
 
-  return {
+  const nextDraft = {
     ...draft,
     pendingImageSource:
       patch.pendingImageSource === undefined
@@ -1106,6 +1151,16 @@ function updateFreeArtworkUpload(
     lowResolution: patch.lowResolution ?? draft.lowResolution,
     error: patch.error === undefined ? draft.error : patch.error,
   }
+
+  return nextDraft.pendingImageSource === draft.pendingImageSource &&
+    nextDraft.pendingFileName === draft.pendingFileName &&
+    nextDraft.pendingImageWidth === draft.pendingImageWidth &&
+    nextDraft.pendingImageHeight === draft.pendingImageHeight &&
+    nextDraft.pendingAspectRatio === draft.pendingAspectRatio &&
+    nextDraft.lowResolution === draft.lowResolution &&
+    nextDraft.error === draft.error
+    ? draft
+    : nextDraft
 }
 
 function getNextFreeArtworkLayerOrder(
@@ -1146,6 +1201,30 @@ function normalizeFreeArtworkItem(item: FreeArtworkItem): FreeArtworkItem {
       ? Math.max(0, Math.round(item.layerOrder))
       : 0,
   }
+}
+
+function areFreeArtworkItemsEqual(
+  first: FreeArtworkItem,
+  second: FreeArtworkItem,
+): boolean {
+  return (
+    first.id === second.id &&
+    first.imageSource === second.imageSource &&
+    first.fileName === second.fileName &&
+    first.imageWidth === second.imageWidth &&
+    first.imageHeight === second.imageHeight &&
+    first.aspectRatio === second.aspectRatio &&
+    first.uniformScale === second.uniformScale &&
+    first.rotation === second.rotation &&
+    first.visible === second.visible &&
+    first.locked === second.locked &&
+    first.layerOrder === second.layerOrder &&
+    areNumberTuplesEqual(first.projectorPosition, second.projectorPosition) &&
+    areNumberTuplesEqual(
+      first.projectorQuaternion,
+      second.projectorQuaternion,
+    )
+  )
 }
 
 function addPendingFreeArtwork(
@@ -1193,6 +1272,10 @@ function selectFreeArtwork(
     return draft
   }
 
+  if (draft.selectedItemId === artworkId) {
+    return draft
+  }
+
   return {
     ...draft,
     selectedItemId: artworkId,
@@ -1204,16 +1287,31 @@ function updateFreeArtworkItem(
   artworkId: string,
   patch: Partial<FreeArtworkItem>,
 ): FreeArtworkDraftState {
+  const itemIndex = draft.items.findIndex((item) => item.id === artworkId)
+
+  if (itemIndex < 0) {
+    return draft
+  }
+
+  const currentItem = draft.items[itemIndex]
+  const nextItem = normalizeFreeArtworkItem({
+    ...currentItem,
+    ...patch,
+  })
+
+  if (
+    areFreeArtworkItemsEqual(currentItem, nextItem) &&
+    draft.selectedItemId === artworkId
+  ) {
+    return draft
+  }
+
+  const nextItems = [...draft.items]
+  nextItems[itemIndex] = nextItem
+
   return {
     ...draft,
-    items: draft.items.map((item) =>
-      item.id === artworkId
-        ? normalizeFreeArtworkItem({
-            ...item,
-            ...patch,
-          })
-        : item,
-    ),
+    items: nextItems,
     selectedItemId: artworkId,
   }
 }
@@ -1251,6 +1349,11 @@ function deleteFreeArtwork(
   artworkId: string,
 ): FreeArtworkDraftState {
   const items = draft.items.filter((item) => item.id !== artworkId)
+
+  if (items.length === draft.items.length) {
+    return draft
+  }
+
   const selectedItemId =
     draft.selectedItemId === artworkId
       ? items.at(-1)?.id ?? null
@@ -1266,6 +1369,10 @@ function deleteFreeArtwork(
 function deleteAllFreeArtwork(
   draft: FreeArtworkDraftState,
 ): FreeArtworkDraftState {
+  if (draft.items.length === 0 && draft.selectedItemId === null) {
+    return draft
+  }
+
   return {
     ...draft,
     items: [],
@@ -1577,6 +1684,13 @@ export function configuratorReducer(
     const target = getSelectionTarget(action.targetId)
 
     if (!target) {
+      return state
+    }
+
+    if (
+      state.draftSelection?.targetId === target.id &&
+      state.draftSelection.serviceId === null
+    ) {
       return state
     }
 
@@ -2122,11 +2236,17 @@ export function configuratorReducer(
       return state
     }
 
+    const artworkConfig = updateArtworkDraft(currentArtwork, action.patch)
+
+    if (artworkConfig === currentArtwork) {
+      return state
+    }
+
     return {
       ...state,
       draftSelection: {
         ...draftSelection,
-        artworkConfig: updateArtworkDraft(currentArtwork, action.patch),
+        artworkConfig,
       },
     }
   }
@@ -2141,14 +2261,20 @@ export function configuratorReducer(
       return state
     }
 
+    const freeArtworkConfig = updateFreeArtworkUpload(
+      draftSelection.freeArtworkConfig,
+      action.patch,
+    )
+
+    if (freeArtworkConfig === draftSelection.freeArtworkConfig) {
+      return state
+    }
+
     return {
       ...state,
       draftSelection: {
         ...draftSelection,
-        freeArtworkConfig: updateFreeArtworkUpload(
-          draftSelection.freeArtworkConfig,
-          action.patch,
-        ),
+        freeArtworkConfig,
       },
     }
   }
@@ -2163,13 +2289,19 @@ export function configuratorReducer(
       return state
     }
 
+    const freeArtworkConfig = addPendingFreeArtwork(
+      draftSelection.freeArtworkConfig,
+    )
+
+    if (freeArtworkConfig === draftSelection.freeArtworkConfig) {
+      return state
+    }
+
     return {
       ...state,
       draftSelection: {
         ...draftSelection,
-        freeArtworkConfig: addPendingFreeArtwork(
-          draftSelection.freeArtworkConfig,
-        ),
+        freeArtworkConfig,
       },
     }
   }
@@ -2184,14 +2316,20 @@ export function configuratorReducer(
       return state
     }
 
+    const freeArtworkConfig = selectFreeArtwork(
+      draftSelection.freeArtworkConfig,
+      action.artworkId,
+    )
+
+    if (freeArtworkConfig === draftSelection.freeArtworkConfig) {
+      return state
+    }
+
     return {
       ...state,
       draftSelection: {
         ...draftSelection,
-        freeArtworkConfig: selectFreeArtwork(
-          draftSelection.freeArtworkConfig,
-          action.artworkId,
-        ),
+        freeArtworkConfig,
       },
     }
   }
@@ -2206,15 +2344,21 @@ export function configuratorReducer(
       return state
     }
 
+    const freeArtworkConfig = updateFreeArtworkItem(
+      draftSelection.freeArtworkConfig,
+      action.artworkId,
+      action.patch,
+    )
+
+    if (freeArtworkConfig === draftSelection.freeArtworkConfig) {
+      return state
+    }
+
     return {
       ...state,
       draftSelection: {
         ...draftSelection,
-        freeArtworkConfig: updateFreeArtworkItem(
-          draftSelection.freeArtworkConfig,
-          action.artworkId,
-          action.patch,
-        ),
+        freeArtworkConfig,
       },
     }
   }
@@ -2229,14 +2373,20 @@ export function configuratorReducer(
       return state
     }
 
+    const freeArtworkConfig = duplicateFreeArtwork(
+      draftSelection.freeArtworkConfig,
+      action.artworkId,
+    )
+
+    if (freeArtworkConfig === draftSelection.freeArtworkConfig) {
+      return state
+    }
+
     return {
       ...state,
       draftSelection: {
         ...draftSelection,
-        freeArtworkConfig: duplicateFreeArtwork(
-          draftSelection.freeArtworkConfig,
-          action.artworkId,
-        ),
+        freeArtworkConfig,
       },
     }
   }
@@ -2251,14 +2401,20 @@ export function configuratorReducer(
       return state
     }
 
+    const freeArtworkConfig = deleteFreeArtwork(
+      draftSelection.freeArtworkConfig,
+      action.artworkId,
+    )
+
+    if (freeArtworkConfig === draftSelection.freeArtworkConfig) {
+      return state
+    }
+
     return {
       ...state,
       draftSelection: {
         ...draftSelection,
-        freeArtworkConfig: deleteFreeArtwork(
-          draftSelection.freeArtworkConfig,
-          action.artworkId,
-        ),
+        freeArtworkConfig,
       },
     }
   }
@@ -2273,13 +2429,19 @@ export function configuratorReducer(
       return state
     }
 
+    const freeArtworkConfig = deleteAllFreeArtwork(
+      draftSelection.freeArtworkConfig,
+    )
+
+    if (freeArtworkConfig === draftSelection.freeArtworkConfig) {
+      return state
+    }
+
     return {
       ...state,
       draftSelection: {
         ...draftSelection,
-        freeArtworkConfig: deleteAllFreeArtwork(
-          draftSelection.freeArtworkConfig,
-        ),
+        freeArtworkConfig,
       },
     }
   }
