@@ -12,7 +12,6 @@ import {
   AdditiveBlending,
   Box3,
   BufferGeometry,
-  CanvasTexture,
   ClampToEdgeWrapping,
   Color,
   EdgesGeometry,
@@ -29,7 +28,6 @@ import {
   PlaneGeometry,
   Quaternion,
   Raycaster,
-  RepeatWrapping,
   SRGBColorSpace,
   Texture,
   Vector2,
@@ -43,6 +41,7 @@ import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import {
   ARTWORK_MESH_NAMES,
+  BLACK_WINDOW_AND_DOOR_TRIM_MESH_NAMES,
   CALIPER_PAINT_MESH_NAMES,
   CERAMIC_MESH_NAMES,
   CHROME_DELETE_MESH_NAMES,
@@ -55,6 +54,7 @@ import {
   PPF_MESH_NAMES,
   POWDER_COAT_MESH_NAMES,
   TINTABLE_GLASS_MESH_NAMES,
+  TRUE_WINDOW_CHROME_MESH_NAMES,
   WRAP_CAPABLE_MESH_NAMES,
 } from '../../config/vehicleParts'
 import type {
@@ -88,11 +88,8 @@ import type {
   WrapConfig,
   WrapPreviewState,
 } from '../../types/configurator'
-import type { RenderPresetId } from '../../types/materialCatalog'
-import {
-  resolveWrapMaterialRenderProfile,
-  type WrapMaterialRenderProfile,
-} from '../../utils/wrapMaterialRenderer'
+import { applyWrapVisualToMaterial } from '../../three/materials/createWrapMaterial'
+import { resolveWrapVisual } from '../../three/materials/wrapMaterialProfiles'
 
 const MODEL_URL = '/Mahir S4.glb'
 const PLATE_TEXTURE_URL = '/MW Plate.png'
@@ -214,6 +211,8 @@ type S4ModelProps = {
 
 const inspectedScenes = new WeakSet<Object3D>()
 const inspectedCaliperPaintMeshScenes = new WeakSet<Object3D>()
+const inspectedWrapUvChannelScenes = new WeakSet<Object3D>()
+const inspectedWrapUvScenes = new WeakSet<Object3D>()
 const inspectedChromeDeleteMeshScenes = new WeakSet<Object3D>()
 const inspectedLightTintMeshScenes = new WeakSet<Object3D>()
 const inspectedPowderCoatMeshScenes = new WeakSet<Object3D>()
@@ -230,31 +229,11 @@ const powderCoatMeshNames = new Set<string>(POWDER_COAT_MESH_NAMES)
 const tintableMeshNames = new Set<string>(TINTABLE_GLASS_MESH_NAMES)
 const fullBodyMeshNames = new Set<string>(FULL_BODY_MESH_NAMES)
 const wrapCapableMeshNames = new Set<string>(WRAP_CAPABLE_MESH_NAMES)
-const factoryChromeSideWindowTrimMeshNames = new Set<string>([
-  'MW_TRIM_WINDOW_CHROME_L',
-  'MW_TRIM_WINDOW_CHROME_R',
-  'MW_TRIM_BODY_SIDE_WINDOW_FRAME_FL',
-  'MW_TRIM_BODY_SIDE_WINDOW_FRAME_FR',
-  'MW_TRIM_BODY_SIDE_WINDOW_FRAME_RL',
-  'MW_TRIM_BODY_SIDE_WINDOW_FRAME_RR',
-  'MW_TRIM_DOOR_WINDOW_FRAME_FL',
-  'MW_TRIM_DOOR_WINDOW_FRAME_FR',
-  'MW_TRIM_DOOR_WINDOW_FRAME_RL',
-  'MW_TRIM_DOOR_WINDOW_FRAME_RR',
-  'MW_TRIM_QUARTER_WINDOW_FRAME_L',
-  'MW_TRIM_QUARTER_WINDOW_FRAME_R',
-])
+const defaultShowroomChromeMeshNames = new Set<string>(
+  TRUE_WINDOW_CHROME_MESH_NAMES,
+)
 const cleanBlackExteriorTrimMeshNames = new Set<string>([
-  'MW_TRIM_B_PILLAR_FL',
-  'MW_TRIM_B_PILLAR_FR',
-  'MW_TRIM_B_PILLAR_RL',
-  'MW_TRIM_B_PILLAR_RR',
-  'MW_INTERIOR_REAR_DOOR_QUARTER_WINDOW_TRIM_RL',
-  'MW_INTERIOR_REAR_DOOR_QUARTER_WINDOW_TRIM_RR',
-  'MW_TRIM_REAR_DOOR_QUARTER_APPLIQUE_RL',
-  'MW_TRIM_REAR_DOOR_QUARTER_APPLIQUE_RR',
-  'MW_TRIM_SAIL_PANEL_L',
-  'MW_TRIM_SAIL_PANEL_R',
+  ...BLACK_WINDOW_AND_DOOR_TRIM_MESH_NAMES,
   'MW_TRIM_WINDSHIELD_SIDE_MOLDING_L',
   'MW_TRIM_WINDSHIELD_SIDE_MOLDING_R',
 ])
@@ -262,12 +241,15 @@ const plateMaterialNamePattern = /^LicPlate_/i
 const factoryPaintMaterialName = 'carpaint'
 
 const cleanFactoryPaintSettings = {
-  clearcoat: 0.84,
-  clearcoatRoughness: 0.08,
-  envMapIntensity: 1.18,
-  metalness: 0.02,
-  reflectivity: 0.56,
-  roughness: 0.24,
+  clearcoat: 1,
+  clearcoatRoughness: 0.02,
+  color: '#f1f1ee',
+  envMapIntensity: 1.22,
+  ior: 1.52,
+  metalness: 0,
+  reflectivity: 0.68,
+  roughness: 0.12,
+  specularIntensity: 1,
 } as const
 
 const cleanFactoryChromeTrimSettings = {
@@ -500,6 +482,55 @@ function cloneMaterials(material: Material | Material[]): Material | Material[] 
   return material.clone()
 }
 
+function markMaterialForRender(material: Material | Material[]) {
+  for (const item of getMaterials(material)) {
+    item.needsUpdate = true
+  }
+}
+
+function clearWrapShaderOverrides(material: Material) {
+  delete material.userData.modifyWrapShaderState
+  delete material.userData.modifyWrapShaderProgramKey
+  material.onBeforeCompile = () => undefined
+  material.customProgramCacheKey = Material.prototype.customProgramCacheKey
+}
+
+function copyMaterialStateFromFactory(current: Material, factory: Material) {
+  if (current.type !== factory.type) {
+    return false
+  }
+
+  current.copy(factory)
+  clearWrapShaderOverrides(current)
+  current.needsUpdate = true
+  return true
+}
+
+function restoreMaterialStateFromFactory(
+  currentMaterial: Material | Material[],
+  factoryMaterial: Material | Material[],
+) {
+  if (Array.isArray(currentMaterial) || Array.isArray(factoryMaterial)) {
+    if (!Array.isArray(currentMaterial) || !Array.isArray(factoryMaterial)) {
+      return null
+    }
+
+    if (currentMaterial.length !== factoryMaterial.length) {
+      return null
+    }
+
+    const canRestoreInPlace = currentMaterial.every((material, index) =>
+      copyMaterialStateFromFactory(material, factoryMaterial[index]),
+    )
+
+    return canRestoreInPlace ? currentMaterial : null
+  }
+
+  return copyMaterialStateFromFactory(currentMaterial, factoryMaterial)
+    ? currentMaterial
+    : null
+}
+
 function clearStandardMaterialTextureInputs(material: MeshStandardMaterial) {
   material.map = null
   material.lightMap = null
@@ -547,8 +578,8 @@ function createCleanFactoryPaintMaterial(
   const runtimeMaterial = new MeshPhysicalMaterial()
 
   runtimeMaterial.name = material.name
-  runtimeMaterial.color.copy(material.color)
-  runtimeMaterial.emissive.copy(material.emissive)
+  runtimeMaterial.color.setStyle(cleanFactoryPaintSettings.color, SRGBColorSpace)
+  runtimeMaterial.emissive.set(0, 0, 0)
   runtimeMaterial.emissiveIntensity = 0
   runtimeMaterial.envMap = material.envMap
   runtimeMaterial.envMapIntensity = cleanFactoryPaintSettings.envMapIntensity
@@ -557,7 +588,10 @@ function createCleanFactoryPaintMaterial(
   runtimeMaterial.clearcoat = cleanFactoryPaintSettings.clearcoat
   runtimeMaterial.clearcoatRoughness =
     cleanFactoryPaintSettings.clearcoatRoughness
+  runtimeMaterial.ior = cleanFactoryPaintSettings.ior
   runtimeMaterial.reflectivity = cleanFactoryPaintSettings.reflectivity
+  runtimeMaterial.specularColor.set(1, 1, 1)
+  runtimeMaterial.specularIntensity = cleanFactoryPaintSettings.specularIntensity
 
   clearStandardMaterialTextureInputs(runtimeMaterial)
   applySmoothOpaqueSurfaceDefaults(runtimeMaterial)
@@ -624,6 +658,7 @@ function isFactoryPaintMaterial(material: Material): material is MeshStandardMat
 
 function createRuntimeMaterial(
   material: Material,
+  defaultShowroomBody: boolean,
   wrapCapable: boolean,
   tintCapable: boolean,
   lightTintCapable: boolean,
@@ -633,7 +668,10 @@ function createRuntimeMaterial(
   cleanFactoryChromeSideWindowTrim: boolean,
   cleanBlackExteriorTrim: boolean,
 ): Material {
-  if (wrapCapable && isFactoryPaintMaterial(material)) {
+  if (
+    (defaultShowroomBody || (wrapCapable && isFactoryPaintMaterial(material))) &&
+    material instanceof MeshStandardMaterial
+  ) {
     return createCleanFactoryPaintMaterial(material)
   }
 
@@ -683,6 +721,7 @@ function createRuntimeMaterial(
 
 function createRuntimeMaterials(
   material: Material | Material[],
+  defaultShowroomBody: boolean,
   wrapCapable: boolean,
   tintCapable: boolean,
   lightTintCapable: boolean,
@@ -696,6 +735,7 @@ function createRuntimeMaterials(
     return material.map((item) =>
       createRuntimeMaterial(
         item,
+        defaultShowroomBody,
         wrapCapable,
         tintCapable,
         lightTintCapable,
@@ -710,6 +750,7 @@ function createRuntimeMaterials(
 
   return createRuntimeMaterial(
     material,
+    defaultShowroomBody,
     wrapCapable,
     tintCapable,
     lightTintCapable,
@@ -896,6 +937,7 @@ function prepareModelScene(
       cloneMaterials(object.material),
     )
 
+    const defaultShowroomBody = fullBodyMeshNames.has(object.name)
     const wrapCapable = wrapCapableMeshNames.has(object.name)
     const tintCapable = tintableMeshNames.has(object.name)
     const lightTintCapable = lightTintMeshNames.has(object.name)
@@ -903,7 +945,7 @@ function prepareModelScene(
     const caliperPaintCapable = caliperPaintMeshNames.has(object.name)
     const powderCoatCapable = powderCoatMeshNames.has(object.name)
     const cleanFactoryChromeSideWindowTrim =
-      factoryChromeSideWindowTrimMeshNames.has(object.name)
+      defaultShowroomChromeMeshNames.has(object.name)
     const cleanBlackExteriorTrim = cleanBlackExteriorTrimMeshNames.has(
       object.name,
     )
@@ -949,6 +991,7 @@ function prepareModelScene(
     } else {
       object.material = createRuntimeMaterials(
         object.material,
+        defaultShowroomBody,
         wrapCapable,
         tintCapable,
         lightTintCapable,
@@ -1163,6 +1206,187 @@ function logDevelopmentInventory(scene: Object3D) {
   console.groupEnd()
 }
 
+function logWrapUvDiagnostics(preparedScene: PreparedModelScene) {
+  if (
+    !import.meta.env.DEV ||
+    inspectedWrapUvScenes.has(preparedScene.scene)
+  ) {
+    return
+  }
+
+  inspectedWrapUvScenes.add(preparedScene.scene)
+
+  const rows = preparedScene.wrapCapableMeshes.map((mesh) => {
+    const uv = mesh.geometry.getAttribute('uv')
+
+    mesh.geometry.computeBoundingBox()
+
+    const size = new Vector3()
+    mesh.geometry.boundingBox?.getSize(size)
+
+    if (!uv) {
+      return {
+        meshName: mesh.name,
+        hasUv: false,
+        uvCount: 0,
+        uvMinU: null,
+        uvMaxU: null,
+        uvMinV: null,
+        uvMaxV: null,
+        uvSpanU: null,
+        uvSpanV: null,
+        sizeX: Number(size.x.toFixed(4)),
+        sizeY: Number(size.y.toFixed(4)),
+        sizeZ: Number(size.z.toFixed(4)),
+      }
+    }
+
+    let minU = Infinity
+    let maxU = -Infinity
+    let minV = Infinity
+    let maxV = -Infinity
+
+    for (let index = 0; index < uv.count; index += 1) {
+      const u = uv.getX(index)
+      const v = uv.getY(index)
+
+      minU = Math.min(minU, u)
+      maxU = Math.max(maxU, u)
+      minV = Math.min(minV, v)
+      maxV = Math.max(maxV, v)
+    }
+
+    return {
+      meshName: mesh.name,
+      hasUv: true,
+      uvCount: uv.count,
+      uvMinU: Number(minU.toFixed(4)),
+      uvMaxU: Number(maxU.toFixed(4)),
+      uvMinV: Number(minV.toFixed(4)),
+      uvMaxV: Number(maxV.toFixed(4)),
+      uvSpanU: Number((maxU - minU).toFixed(4)),
+      uvSpanV: Number((maxV - minV).toFixed(4)),
+      sizeX: Number(size.x.toFixed(4)),
+      sizeY: Number(size.y.toFixed(4)),
+      sizeZ: Number(size.z.toFixed(4)),
+    }
+  })
+
+  console.groupCollapsed('ModifyWrap wrap UV diagnostics')
+console.table(rows)
+console.groupEnd()
+
+const invalidUvRows = rows.filter((row) => {
+  if (!row.hasUv) {
+    return true
+  }
+
+  if (
+    row.uvSpanU === null ||
+    row.uvSpanV === null
+  ) {
+    return true
+  }
+
+  return row.uvSpanU < 0.001 || row.uvSpanV < 0.001
+})
+
+console.group('ModifyWrap invalid wrap UV meshes')
+
+invalidUvRows.forEach((row, index) => {
+  console.log(
+    `${index + 1}. ${row.meshName}`,
+    {
+      hasUv: row.hasUv,
+      uvSpanU: row.uvSpanU,
+      uvSpanV: row.uvSpanV,
+      sizeX: row.sizeX,
+      sizeY: row.sizeY,
+      sizeZ: row.sizeZ,
+    },
+  )
+})
+
+console.groupEnd()
+}
+
+function getUvChannelSummary(
+  geometry: BufferGeometry,
+  channelName: string,
+): string {
+  const attribute = geometry.getAttribute(channelName)
+
+  if (!attribute || attribute.itemSize < 2) {
+    return 'missing'
+  }
+
+  let minU = Infinity
+  let maxU = -Infinity
+  let minV = Infinity
+  let maxV = -Infinity
+
+  for (let index = 0; index < attribute.count; index += 1) {
+    const u = attribute.getX(index)
+    const v = attribute.getY(index)
+
+    minU = Math.min(minU, u)
+    maxU = Math.max(maxU, u)
+    minV = Math.min(minV, v)
+    maxV = Math.max(maxV, v)
+  }
+
+  const spanU = maxU - minU
+  const spanV = maxV - minV
+  const usable = spanU >= 0.001 && spanV >= 0.001
+
+  return `${spanU.toFixed(4)} × ${spanV.toFixed(4)} ${
+    usable ? 'usable' : 'collapsed'
+  }`
+}
+
+function logWrapUvChannelDiagnostics(
+  preparedScene: PreparedModelScene,
+) {
+  if (
+    !import.meta.env.DEV ||
+    inspectedWrapUvChannelScenes.has(preparedScene.scene)
+  ) {
+    return
+  }
+
+  inspectedWrapUvChannelScenes.add(preparedScene.scene)
+
+  const importantMeshNames = new Set([
+    'MW_PANEL_DOOR_FL',
+    'MW_PANEL_DOOR_FR',
+    'MW_PANEL_DOOR_RL',
+    'MW_PANEL_DOOR_RR',
+    'MW_PANEL_FENDER_FL',
+    'MW_PANEL_FENDER_FR',
+    'MW_PANEL_FRONT_BUMPER',
+    'MW_PANEL_REAR_BUMPER',
+    'MW_PANEL_TRUNK',
+    'MW_PANEL_FUEL_DOOR_R',
+    'MW_SHELL_BODY_SIDE_OUTER_L',
+    'MW_SHELL_BODY_SIDE_OUTER_R',
+  ])
+
+  const rows = preparedScene.wrapCapableMeshes
+    .filter((mesh) => importantMeshNames.has(mesh.name))
+    .map((mesh) => ({
+      meshName: mesh.name,
+      attributes: Object.keys(mesh.geometry.attributes).join(', '),
+      uv: getUvChannelSummary(mesh.geometry, 'uv'),
+      uv1: getUvChannelSummary(mesh.geometry, 'uv1'),
+      uv2: getUvChannelSummary(mesh.geometry, 'uv2'),
+      uv3: getUvChannelSummary(mesh.geometry, 'uv3'),
+    }))
+
+  console.group('ModifyWrap body UV channels')
+  console.table(rows)
+  console.groupEnd()
+}
+
 function logMissingWrapCapableMeshes(preparedScene: PreparedModelScene) {
   if (
     !import.meta.env.DEV ||
@@ -1301,27 +1525,6 @@ function logMissingLightTintMeshes(preparedScene: PreparedModelScene) {
   console.table(missingMeshNames)
 }
 
-function copyMaterialState(
-  target: Material | Material[],
-  source: Material | Material[],
-) {
-  if (Array.isArray(target) && Array.isArray(source)) {
-    const materialCount = Math.min(target.length, source.length)
-
-    for (let index = 0; index < materialCount; index += 1) {
-      target[index].copy(source[index])
-      target[index].needsUpdate = true
-    }
-
-    return
-  }
-
-  if (!Array.isArray(target) && !Array.isArray(source)) {
-    target.copy(source)
-    target.needsUpdate = true
-  }
-}
-
 function resetMeshMaterialToFactory(
   mesh: ModelMesh,
   preparedScene: PreparedModelScene,
@@ -1333,495 +1536,32 @@ function resetMeshMaterialToFactory(
     return
   }
 
-  copyMaterialState(mesh.material, factoryMaterial)
-}
+  const currentMaterial = mesh.material
+  const restoredMaterial = restoreMaterialStateFromFactory(
+    currentMaterial,
+    factoryMaterial,
+  )
 
-type WrapProceduralTextureKey =
-  | 'brushed'
-  | 'carbon'
-  | 'diamond'
-  | 'microflake'
-  | 'phosphor'
-  | 'rugged'
-  | 'velvet'
-
-const wrapProceduralTextureCache = new Map<
-  WrapProceduralTextureKey,
-  Texture
->()
-
-function getWrapProceduralTexture(
-  key: WrapProceduralTextureKey,
-): Texture {
-  const cachedTexture = wrapProceduralTextureCache.get(key)
-
-  if (cachedTexture) {
-    return cachedTexture
-  }
-
-  const texture = createWrapProceduralTexture(key)
-
-  wrapProceduralTextureCache.set(key, texture)
-  return texture
-}
-
-function createWrapProceduralTexture(
-  key: WrapProceduralTextureKey,
-): Texture {
-  const size = 128
-  const canvas = document.createElement('canvas')
-  const context = canvas.getContext('2d')
-
-  canvas.width = size
-  canvas.height = size
-
-  if (!context) {
-    throw new Error('Wrap material texture canvas unavailable')
-  }
-
-  drawWrapProceduralTexture(context, key, size)
-
-  const texture = new CanvasTexture(canvas)
-  const repeat = getWrapTextureRepeat(key)
-
-  texture.wrapS = RepeatWrapping
-  texture.wrapT = RepeatWrapping
-  texture.repeat.set(repeat.x, repeat.y)
-  texture.needsUpdate = true
-
-  return texture
-}
-
-function drawWrapProceduralTexture(
-  context: CanvasRenderingContext2D,
-  key: WrapProceduralTextureKey,
-  size: number,
-) {
-  let seed = key.length * 7919
-  const random = () => {
-    seed = (seed * 1664525 + 1013904223) % 4294967296
-    return seed / 4294967296
-  }
-
-  context.clearRect(0, 0, size, size)
-  context.fillStyle = 'rgb(128,128,128)'
-  context.fillRect(0, 0, size, size)
-
-  if (key === 'carbon') {
-    context.fillStyle = 'rgb(92,92,92)'
-    context.fillRect(0, 0, size, size)
-    context.strokeStyle = 'rgba(190,190,190,0.42)'
-    context.lineWidth = 2
-
-    for (let offset = -size; offset < size * 2; offset += 8) {
-      context.beginPath()
-      context.moveTo(offset, 0)
-      context.lineTo(offset + size, size)
-      context.stroke()
-      context.beginPath()
-      context.moveTo(offset + 4, size)
-      context.lineTo(offset + size + 4, 0)
-      context.stroke()
-    }
-
+  if (restoredMaterial) {
+    mesh.material = restoredMaterial
     return
   }
 
-  if (key === 'brushed') {
-    context.fillStyle = 'rgb(122,122,122)'
-    context.fillRect(0, 0, size, size)
-
-    for (let y = 0; y < size; y += 1) {
-      const shade = 102 + Math.round(random() * 48)
-
-      context.fillStyle = `rgb(${shade},${shade},${shade})`
-      context.fillRect(0, y, size, 1)
-    }
-
-    return
-  }
-
-  if (key === 'rugged') {
-    context.fillStyle = 'rgb(148,148,148)'
-    context.fillRect(0, 0, size, size)
-
-    for (let index = 0; index < 900; index += 1) {
-      const shade = 90 + Math.round(random() * 100)
-
-      context.fillStyle = `rgba(${shade},${shade},${shade},0.68)`
-      context.fillRect(
-        Math.floor(random() * size),
-        Math.floor(random() * size),
-        1 + Math.floor(random() * 3),
-        1 + Math.floor(random() * 3),
-      )
-    }
-
-    return
-  }
-
-  if (key === 'velvet') {
-    context.fillStyle = 'rgb(112,112,112)'
-    context.fillRect(0, 0, size, size)
-
-    for (let x = 0; x < size; x += 2) {
-      const shade = 92 + Math.round(random() * 64)
-
-      context.strokeStyle = `rgba(${shade},${shade},${shade},0.55)`
-      context.beginPath()
-      context.moveTo(x, 0)
-      context.lineTo(x + random() * 8 - 4, size)
-      context.stroke()
-    }
-
-    return
-  }
-
-  const sparkleCount =
-    key === 'diamond' ? 420 : key === 'microflake' ? 360 : 180
-
-  for (let index = 0; index < sparkleCount; index += 1) {
-    const shade =
-      key === 'phosphor'
-        ? 142 + Math.round(random() * 68)
-        : 82 + Math.round(random() * 150)
-    const alpha = key === 'diamond' ? 0.82 : 0.46
-
-    context.fillStyle = `rgba(${shade},${shade},${shade},${alpha})`
-    context.fillRect(
-      Math.floor(random() * size),
-      Math.floor(random() * size),
-      key === 'diamond' ? 1 : 2,
-      key === 'diamond' ? 1 : 2,
-    )
-  }
-}
-
-function getWrapTextureRepeat(
-  key: WrapProceduralTextureKey,
-): { x: number; y: number } {
-  if (key === 'brushed') {
-    return { x: 14, y: 34 }
-  }
-
-  if (key === 'carbon') {
-    return { x: 24, y: 24 }
-  }
-
-  if (key === 'rugged') {
-    return { x: 30, y: 30 }
-  }
-
-  if (key === 'velvet') {
-    return { x: 20, y: 20 }
-  }
-
-  return { x: 42, y: 42 }
-}
-
-function applyWrapProceduralTexture(
-  material: MeshStandardMaterial,
-  presetId: RenderPresetId,
-) {
-  if (presetId === 'metallic') {
-    const texture = getWrapProceduralTexture('microflake')
-
-    material.roughnessMap = texture
-    material.bumpMap = texture
-    material.bumpScale = 0.0018
-    return
-  }
-
-  if (presetId === 'diamond_flake') {
-    const texture = getWrapProceduralTexture('diamond')
-
-    material.roughnessMap = texture
-    material.bumpMap = texture
-    material.bumpScale = 0.0024
-    return
-  }
-
-  if (presetId === 'special_effect') {
-    const texture = getWrapProceduralTexture('microflake')
-
-    material.roughnessMap = texture
-    material.bumpMap = texture
-    material.bumpScale = 0.0018
-    return
-  }
-
-  if (presetId === 'carbon_fiber') {
-    const texture = getWrapProceduralTexture('carbon')
-
-    material.roughnessMap = texture
-    material.bumpMap = texture
-    material.bumpScale = 0.0045
-    return
-  }
-
-  if (presetId === 'brushed_metal') {
-    const texture = getWrapProceduralTexture('brushed')
-
-    material.roughnessMap = texture
-    material.bumpMap = texture
-    material.bumpScale = 0.0032
-    return
-  }
-
-  if (
-    presetId === 'rugged_texture' ||
-    presetId === 'patterned_texture' ||
-    presetId === 'textured_generic'
-  ) {
-    const texture = getWrapProceduralTexture('rugged')
-
-    material.roughnessMap = texture
-    material.bumpMap = texture
-    material.bumpScale = 0.011
-    return
-  }
-
-  if (presetId === 'velvet') {
-    const texture = getWrapProceduralTexture('velvet')
-
-    material.roughnessMap = texture
-    material.bumpMap = texture
-    material.bumpScale = 0.005
-    return
-  }
-
-  if (presetId === 'glow_in_dark') {
-    const texture = getWrapProceduralTexture('phosphor')
-
-    material.roughnessMap = texture
-    material.bumpMap = texture
-    material.bumpScale = 0.002
-  }
-}
-
-function getWrapEnvMapIntensity(presetId: RenderPresetId): number {
-  if (presetId === 'solid_high_gloss') {
-    return 1.38
-  }
-
-  if (presetId === 'solid_gloss') {
-    return 1.24
-  }
-
-  if (presetId === 'solid_satin') {
-    return 1.02
-  }
-
-  if (presetId === 'solid_matte' || presetId === 'velvet') {
-    return 0.72
-  }
-
-  if (presetId === 'chrome') {
-    return 1.86
-  }
-
-  if (presetId === 'brushed_metal') {
-    return 1.28
-  }
-
-  if (
-    presetId === 'rugged_texture' ||
-    presetId === 'patterned_texture' ||
-    presetId === 'textured_generic'
-  ) {
-    return 0.86
-  }
-
-  return 1.22
-}
-
-function getWrapReflectivity(presetId: RenderPresetId): number {
-  if (presetId === 'solid_matte' || presetId === 'velvet') {
-    return 0.22
-  }
-
-  if (presetId === 'solid_satin' || presetId === 'rugged_texture') {
-    return 0.42
-  }
-
-  if (presetId === 'chrome') {
-    return 1
-  }
-
-  return 0.58
-}
-
-function getColorFromHex(hexColor: string): Color {
-  return new Color().setStyle(hexColor, SRGBColorSpace)
-}
-
-function getWrapDisplayColor(profile: WrapMaterialRenderProfile): Color {
-  const color = getColorFromHex(profile.colorHex)
-  const secondaryColor = profile.secondaryColorHex
-    ? getColorFromHex(profile.secondaryColorHex)
-    : null
-  const tertiaryColor = profile.tertiaryColorHex
-    ? getColorFromHex(profile.tertiaryColorHex)
-    : null
-
-  if (profile.renderPresetId === 'photochromic' && secondaryColor) {
-    const sunlight = Math.min(1, Math.max(0, profile.previewIntensity))
-
-    color.lerp(secondaryColor, sunlight * 0.72)
-
-    if (tertiaryColor && sunlight > 0.45) {
-      color.lerp(tertiaryColor, (sunlight - 0.45) * 0.5)
-    }
-  }
-
-  if (profile.renderPresetId === 'fluorescent' && secondaryColor) {
-    color.lerp(secondaryColor, profile.previewMode === 'uv' ? 0.32 : 0.12)
-  }
-
-  if (profile.renderPresetId === 'pearl' && secondaryColor) {
-    color.lerp(secondaryColor, 0.08)
-  }
-
-  if (profile.renderPresetId === 'color_shift' && secondaryColor) {
-    color.lerp(secondaryColor, 0.06)
-  }
-
-  if (
-    profile.renderPresetId === 'glow_in_dark' &&
-    profile.previewMode === 'night' &&
-    secondaryColor
-  ) {
-    color.lerp(secondaryColor, 0.18)
-  }
-
-  return color
-}
-
-function applyPhysicalWrapPreset(
-  material: MeshPhysicalMaterial,
-  profile: WrapMaterialRenderProfile,
-) {
-  const preset = profile.renderPreset
-  const secondaryColor = profile.secondaryColorHex
-    ? getColorFromHex(profile.secondaryColorHex)
-    : null
-  const tertiaryColor = profile.tertiaryColorHex
-    ? getColorFromHex(profile.tertiaryColorHex)
-    : null
-
-  material.clearcoat = preset.clearcoat
-  material.clearcoatRoughness = preset.clearcoatRoughness
-  material.reflectivity = getWrapReflectivity(profile.renderPresetId)
-  material.transmission = 0
-  material.thickness = 0
-  material.iridescence = 0
-  material.iridescenceIOR = 1.3
-  material.iridescenceThicknessRange = [100, 420]
-  material.sheen = 0
-  material.sheenRoughness = 1
-  material.specularIntensity = 1
-  material.anisotropy = preset.anisotropy
-
-  if (profile.renderPresetId === 'pearl') {
-    material.iridescence = 0.18
-    material.sheen = 0.22
-    material.sheenRoughness = 0.42
-
-    if (secondaryColor) {
-      material.sheenColor.copy(secondaryColor)
-    }
-  }
-
-  if (profile.renderPresetId === 'color_shift') {
-    material.iridescence = 0.54
-    material.iridescenceThicknessRange = [190, 680]
-    material.sheen = 0.28
-    material.sheenRoughness = 0.36
-
-    if (secondaryColor) {
-      material.sheenColor.copy(secondaryColor)
-    }
-
-    if (tertiaryColor) {
-      material.specularColor.copy(tertiaryColor)
-    }
-  }
-
-  if (profile.renderPresetId === 'chrome') {
-    material.reflectivity = 1
-    material.specularIntensity = 1
-  }
-
-  if (profile.renderPresetId === 'fluorescent') {
-    material.specularIntensity = profile.previewMode === 'uv' ? 1.18 : 1.08
-  }
-
-  if (profile.renderPresetId === 'velvet') {
-    material.clearcoat = 0
-    material.clearcoatRoughness = 0.9
-    material.reflectivity = 0.14
-    material.sheen = 0.72
-    material.sheenRoughness = 0.78
-
-    if (secondaryColor) {
-      material.sheenColor.copy(secondaryColor)
-    }
-  }
-}
-
-function applyWrapEmission(
-  material: MeshStandardMaterial,
-  profile: WrapMaterialRenderProfile,
-) {
-  material.emissive.set(0, 0, 0)
-  material.emissiveIntensity = 0
-
-  if (profile.renderPresetId === 'fluorescent') {
-    const emissiveColor = profile.secondaryColorHex ?? profile.colorHex
-
-    material.emissive.copy(getColorFromHex(emissiveColor))
-    material.emissiveIntensity = profile.previewMode === 'uv' ? 0.085 : 0.028
-    return
-  }
-
-  if (
-    profile.renderPresetId === 'glow_in_dark' &&
-    profile.previewMode === 'night'
-  ) {
-    const emissiveColor =
-      profile.tertiaryColorHex ?? profile.secondaryColorHex ?? profile.colorHex
-
-    material.emissive.copy(getColorFromHex(emissiveColor))
-    material.emissiveIntensity = 0.32
-  }
+  const nextMaterial = cloneMaterials(factoryMaterial)
+
+  markMaterialForRender(nextMaterial)
+  mesh.material = nextMaterial
+  disposeMaterial(currentMaterial)
 }
 
 function applyWrapToMaterial(material: Material, wrap: WrapConfig) {
-  if (!(material instanceof MeshStandardMaterial)) {
+  const visual = resolveWrapVisual(wrap)
+
+  if (!visual) {
     return
   }
 
-  const profile = resolveWrapMaterialRenderProfile(wrap)
-
-  if (!profile) {
-    return
-  }
-
-  clearStandardMaterialTextureInputs(material)
-  applySmoothOpaqueSurfaceDefaults(material)
-
-  material.color.copy(getWrapDisplayColor(profile))
-  material.metalness = profile.renderPreset.metalness
-  material.roughness = profile.renderPreset.roughness
-  material.envMapIntensity = getWrapEnvMapIntensity(profile.renderPresetId)
-  applyWrapEmission(material, profile)
-  applyWrapProceduralTexture(material, profile.renderPresetId)
-
-  if (material instanceof MeshPhysicalMaterial) {
-    applyPhysicalWrapPreset(material, profile)
-  }
-
-  material.needsUpdate = true
+  applyWrapVisualToMaterial(material, visual)
 }
 
 function applyWrapToMesh(mesh: ModelMesh, wrap: WrapConfig) {
@@ -1910,6 +1650,16 @@ function applyWrapMaterials(
   ceramicPreview: CeramicPreviewState | null,
   ppfPreview: PpfPreviewState | null,
 ) {
+  if (import.meta.env.DEV) {
+    console.info(
+      'ModifyWrap wrap material pass',
+      JSON.stringify({
+        fullBodyWrap: appliedDesign.fullBody.wrap,
+        wrapPreview,
+      }),
+    )
+  }
+
   const ceramicPreviewTargetIds = new Set(ceramicPreview?.targetIds ?? [])
   const ppfPreviewTargetIds = new Set(ppfPreview?.targetIds ?? [])
 
@@ -3768,7 +3518,7 @@ export function S4Model({
 }: S4ModelProps) {
   const gltf = useGLTF(MODEL_URL)
   const plateTexture = useTexture(PLATE_TEXTURE_URL)
-  const { camera, gl, scene: rootScene } = useThree()
+  const { camera, gl, invalidate, scene: rootScene } = useThree()
   const pointerStartRef = useRef<PointerStart | null>(null)
   const artworkDragRef = useRef<ArtworkDragState | null>(null)
   const freeArtworkDragRef = useRef<FreeArtworkDragState | null>(null)
@@ -3879,6 +3629,14 @@ export function S4Model({
   }, [gltf.scene])
 
   useEffect(() => {
+  logWrapUvDiagnostics(preparedScene)
+}, [preparedScene])
+
+useEffect(() => {
+  logWrapUvChannelDiagnostics(preparedScene)
+}, [preparedScene])
+
+  useEffect(() => {
     logMissingWrapCapableMeshes(preparedScene)
   }, [preparedScene])
 
@@ -3939,6 +3697,26 @@ export function S4Model({
   useEffect(() => {
     applyPowderCoatMaterials(preparedScene, appliedDesign, powderCoatPreview)
   }, [appliedDesign, powderCoatPreview, preparedScene])
+
+  useEffect(() => {
+    invalidate()
+    gl.render(rootScene, camera)
+  }, [
+    appliedDesign,
+    caliperPaintPreview,
+    camera,
+    ceramicPreview,
+    chromeDeletePreview,
+    gl,
+    invalidate,
+    lightTintPreview,
+    ppfPreview,
+    powderCoatPreview,
+    preparedScene,
+    rootScene,
+    tintPreview,
+    wrapPreview,
+  ])
 
   useEffect(() => {
     applyOutlines(preparedScene, selectedMeshNames, hoveredMeshNames)

@@ -338,6 +338,41 @@ export const FULL_BODY_MESH_NAMES = [
   'MW_PART_SHARK_FIN_ANTENNA',
 ] as const
 
+export const MIRROR_CAP_MESH_NAMES = [
+  'MW_PANEL_MIRROR_CAP_L',
+  'MW_PANEL_MIRROR_CAP_R',
+] as const
+
+export const TRUE_WINDOW_CHROME_MESH_NAMES = [
+  'MW_TRIM_WINDOW_CHROME_L',
+  'MW_TRIM_WINDOW_CHROME_R',
+] as const
+
+export const BLACK_WINDOW_AND_DOOR_TRIM_MESH_NAMES = [
+  'MW_TRIM_B_PILLAR_FL',
+  'MW_TRIM_B_PILLAR_FR',
+  'MW_TRIM_B_PILLAR_RL',
+  'MW_TRIM_B_PILLAR_RR',
+  'MW_TRIM_BODY_SIDE_WINDOW_FRAME_FL',
+  'MW_TRIM_BODY_SIDE_WINDOW_FRAME_FR',
+  'MW_TRIM_BODY_SIDE_WINDOW_FRAME_RL',
+  'MW_TRIM_BODY_SIDE_WINDOW_FRAME_RR',
+  'MW_TRIM_DOOR_WINDOW_FRAME_FL',
+  'MW_TRIM_DOOR_WINDOW_FRAME_FR',
+  'MW_TRIM_DOOR_WINDOW_FRAME_RL',
+  'MW_TRIM_DOOR_WINDOW_FRAME_RR',
+  'MW_TRIM_QUARTER_WINDOW_FRAME_L',
+  'MW_TRIM_QUARTER_WINDOW_FRAME_R',
+  'MW_TRIM_REAR_DOOR_QUARTER_APPLIQUE_RL',
+  'MW_TRIM_REAR_DOOR_QUARTER_APPLIQUE_RR',
+  'MW_TRIM_SAIL_PANEL_L',
+  'MW_TRIM_SAIL_PANEL_R',
+  'MW_INTERIOR_REAR_DOOR_QUARTER_WINDOW_TRIM_RL',
+  'MW_INTERIOR_REAR_DOOR_QUARTER_WINDOW_TRIM_RR',
+  'MW_TRIM_MIRROR_BASE_L',
+  'MW_TRIM_MIRROR_BASE_R',
+] as const
+
 const fullBodyMeshSet = new Set<string>(FULL_BODY_MESH_NAMES)
 
 function vehiclePart(
@@ -398,8 +433,8 @@ export const VEHICLE_PARTS = [
   vehiclePart('door-handle-rear-right', 'Handle RR', ['MW_PART_DOOR_HANDLE_RR'], 'painted-body', PAINTED_BODY_SERVICES, 'body'),
   vehiclePart('shark-fin', 'Shark Fin', ['MW_PART_SHARK_FIN_ANTENNA'], 'painted-body', PAINTED_BODY_SERVICES, 'body'),
 
-  vehiclePart('window-chrome-left', 'Window Chrome Left', ['MW_TRIM_WINDOW_CHROME_L', 'MW_TRIM_BODY_SIDE_WINDOW_FRAME_FL', 'MW_TRIM_BODY_SIDE_WINDOW_FRAME_RL', 'MW_TRIM_DOOR_WINDOW_FRAME_FL', 'MW_TRIM_DOOR_WINDOW_FRAME_RL', 'MW_TRIM_QUARTER_WINDOW_FRAME_L'], 'chrome', CHROME_SERVICES, 'chrome'),
-  vehiclePart('window-chrome-right', 'Window Chrome Right', ['MW_TRIM_WINDOW_CHROME_R', 'MW_TRIM_BODY_SIDE_WINDOW_FRAME_FR', 'MW_TRIM_BODY_SIDE_WINDOW_FRAME_RR', 'MW_TRIM_DOOR_WINDOW_FRAME_FR', 'MW_TRIM_DOOR_WINDOW_FRAME_RR', 'MW_TRIM_QUARTER_WINDOW_FRAME_R'], 'chrome', CHROME_SERVICES, 'chrome'),
+  vehiclePart('window-chrome-left', 'Window Chrome Left', ['MW_TRIM_WINDOW_CHROME_L'], 'chrome', CHROME_SERVICES, 'chrome'),
+  vehiclePart('window-chrome-right', 'Window Chrome Right', ['MW_TRIM_WINDOW_CHROME_R'], 'chrome', CHROME_SERVICES, 'chrome'),
   vehiclePart('grille-frame', 'Grille Frame', ['MW_TRIM_GRILLE_FRAME_FRONT'], 'chrome', CHROME_SERVICES, 'chrome'),
   vehiclePart('lower-chrome-left', 'Lower Grille Chrome Left', ['MW_TRIM_FRONT_LOWER_GRILLE_CHROME_L_01', 'MW_TRIM_FRONT_LOWER_GRILLE_CHROME_L_02'], 'chrome', CHROME_SERVICES, 'chrome'),
   vehiclePart('lower-chrome-right', 'Lower Grille Chrome Right', ['MW_TRIM_FRONT_LOWER_GRILLE_CHROME_R_01', 'MW_TRIM_FRONT_LOWER_GRILLE_CHROME_R_02'], 'chrome', CHROME_SERVICES, 'chrome'),

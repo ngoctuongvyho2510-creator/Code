@@ -21,6 +21,7 @@ export type RenderPresetId =
   | 'solid_satin'
   | 'solid_matte'
   | 'metallic'
+  | 'liquid_metallic'
   | 'pearl'
   | 'color_shift'
   | 'carbon_fiber'
@@ -30,11 +31,6 @@ export type RenderPresetId =
   | 'chrome'
   | 'patterned_texture'
   | 'special_effect'
-  | 'photochromic'
-  | 'fluorescent'
-  | 'velvet'
-  | 'glow_in_dark'
-  | 'textured_generic'
 
 export type RenderPresetDefinition = {
   id: RenderPresetId
@@ -44,6 +40,8 @@ export type RenderPresetDefinition = {
   clearcoat: number
   clearcoatRoughness: number
   anisotropy: number
+  envMapIntensity: number
+  effectStrength: number
   flakeStrength: number
   normalOrTexture: string
   dynamicDriver: string
@@ -72,6 +70,21 @@ export type MaterialCatalogItem = {
   sourceUrl?: string
 }
 
+
+export type MaterialCalibrationOverride = {
+  baseColor: string
+  secondaryColor?: string
+  tertiaryColor?: string
+  grazingColor?: string
+  fresnelStrength?: number
+  roughness?: number
+  metalness?: number
+  clearcoat?: number
+  clearcoatRoughness?: number
+  envMapIntensity?: number
+  effectStrength?: number
+}
+
 export type OfficialWrapSelection = {
   kind: 'official'
   materialId: string
@@ -79,6 +92,8 @@ export type OfficialWrapSelection = {
   manufacturerCode: string
   displayName: string
   renderPresetId: RenderPresetId
+  calibrationOverride?: MaterialCalibrationOverride
+  calibrationRevision?: number
 }
 
 export type CustomWrapSelection = {

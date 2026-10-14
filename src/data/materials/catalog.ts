@@ -151,8 +151,7 @@ function matchesMaterialFilter(
       preset === 'carbon_fiber' ||
       preset === 'brushed_metal' ||
       preset === 'patterned_texture' ||
-      preset === 'rugged_texture' ||
-      preset === 'textured_generic'
+      preset === 'rugged_texture'
     )
   }
 

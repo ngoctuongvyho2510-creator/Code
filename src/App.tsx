@@ -1,4 +1,11 @@
-import { useCallback, useMemo, useReducer, useRef, type PointerEvent } from 'react'
+import {
+  useCallback,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  type PointerEvent,
+} from 'react'
 import {
   FULL_BODY_PART_IDS,
   FULL_BODY_TARGET_ID,
@@ -18,9 +25,11 @@ import {
   resolvePowderCoatScopeTargetIds,
   resolveTintScopeTargetIds,
 } from './config/vehicleParts'
+import { MaterialCalibrationPanel } from './components/calibration/MaterialCalibrationPanel'
 import { PartServicePopup } from './components/viewer/PartServicePopup'
 import {
   VehicleViewer,
+  type LightingMode,
   type VehicleViewerHandle,
 } from './components/viewer/VehicleViewer'
 import {
@@ -58,17 +67,28 @@ import type {
   WrapConfigPatch,
   WrapPreviewState,
 } from './types/configurator'
+import type { OfficialWrapSelection } from './types/materialCatalog'
 import './App.css'
 
+const lightingModes: readonly LightingMode[] = ['studio', 'day', 'night']
+
 const viewerControls = [
-  'Reset View',
-  'Front Left',
-  'Front Right',
-  'Left',
-  'Right',
-  'Top',
-  'Fullscreen',
-]
+  { label: 'Reset View', action: 'reset' },
+  { label: 'Front Left', action: 'frontLeft' },
+  { label: 'Front Right', action: 'frontRight' },
+  { label: 'Left', action: 'left' },
+  { label: 'Right', action: 'right' },
+  { label: 'Top', action: 'top' },
+  { label: 'Fullscreen', action: 'fullscreen' },
+] as const
+
+function isMaterialCalibrationModeEnabled(): boolean {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  return new URLSearchParams(window.location.search).get('calibrate') === '1'
+}
 
 function App() {
   const vehicleViewerRef = useRef<VehicleViewerHandle>(null)
@@ -76,6 +96,14 @@ function App() {
     configuratorReducer,
     initialConfiguratorState,
   )
+  const calibrationMode = useMemo(
+    () => isMaterialCalibrationModeEnabled(),
+    [],
+  )
+  const [calibrationPreview, setCalibrationPreview] =
+    useState<OfficialWrapSelection | null>(null)
+  const [lightingMode, setLightingMode] = useState<LightingMode>('studio')
+  const [inspectionSweep, setInspectionSweep] = useState(false)
 
   const activeTarget = useMemo(() => {
     const draftSelection = configuratorState.draftSelection
@@ -99,6 +127,17 @@ function App() {
       wrap: draftSelection.wrapConfig,
     }
   }, [configuratorState.draftSelection])
+
+  const effectiveWrapPreview = useMemo<WrapPreviewState | null>(() => {
+    if (calibrationMode && calibrationPreview) {
+      return {
+        targetId: FULL_BODY_TARGET_ID,
+        wrap: calibrationPreview,
+      }
+    }
+
+    return wrapPreview
+  }, [calibrationMode, calibrationPreview, wrapPreview])
 
   const tintPreview = useMemo<TintPreviewState | null>(() => {
     const draftSelection = configuratorState.draftSelection
@@ -524,6 +563,15 @@ function App() {
     dispatch({ type: 'select-target', targetId: partId })
   }, [])
 
+  const handleCalibrationPreviewChange = useCallback(
+    (selection: OfficialWrapSelection | null) => {
+      setCalibrationPreview(selection)
+    },
+    [],
+  )
+
+  const ignoreCalibrationPartSelection = useCallback(() => undefined, [])
+
   const handleCancelDraft = useCallback(() => {
     dispatch({ type: 'cancel-draft' })
   }, [])
@@ -813,6 +861,7 @@ function App() {
 
     if (
       event.target.closest('[data-popup-root]') ||
+      event.target.closest('[data-calibration-root]') ||
       event.target.closest('.vehicle-viewer-canvas')
     ) {
       return
@@ -858,28 +907,44 @@ function App() {
             chromeDeletePreview={chromeDeletePreview}
             freeArtworkPreview={freeArtworkPreview}
             lightTintPreview={lightTintPreview}
+            lightingMode={lightingMode}
+            inspectionSweep={inspectionSweep}
             ppfPreview={ppfPreview}
             ceramicPreview={ceramicPreview}
             powderCoatPreview={powderCoatPreview}
             ref={vehicleViewerRef}
-            selectedTargetId={configuratorState.draftSelection?.targetId ?? null}
+            selectedTargetId={
+              calibrationMode
+                ? null
+                : (configuratorState.draftSelection?.targetId ?? null)
+            }
             tintPreview={tintPreview}
-            wrapPreview={wrapPreview}
+            wrapPreview={effectiveWrapPreview}
             onArtworkPreviewTransformChange={
               handleArtworkPreviewTransformChange
             }
             onFreeArtworkTransformChange={handleFreeArtworkTransformChange}
-            onPartSelect={handlePartSelect}
-            onScenePointerMissed={handleCancelDraft}
+            onPartSelect={
+              calibrationMode ? ignoreCalibrationPartSelection : handlePartSelect
+            }
+            onScenePointerMissed={
+              calibrationMode ? ignoreCalibrationPartSelection : handleCancelDraft
+            }
           />
-          <button
-            type="button"
-            className="full-body-action"
-            onClick={handleFullBodySelect}
-          >
-            Full Body
-          </button>
-          {activeTarget ? (
+          {calibrationMode ? (
+            <MaterialCalibrationPanel
+              onPreviewChange={handleCalibrationPreviewChange}
+            />
+          ) : (
+            <button
+              type="button"
+              className="full-body-action"
+              onClick={handleFullBodySelect}
+            >
+              Full Body
+            </button>
+          )}
+          {!calibrationMode && activeTarget ? (
             <PartServicePopup
               target={activeTarget}
               selectedServiceId={
@@ -1005,20 +1070,59 @@ function App() {
       </div>
 
       <footer className="viewer-toolbar" aria-label="Viewer toolbar">
-        {viewerControls.map((control) => (
+        {lightingModes.map((mode) => (
           <button
             type="button"
+            aria-pressed={lightingMode === mode}
             className="toolbar-button"
-            key={control}
-            onClick={
-              control === 'Reset View'
-                ? () => vehicleViewerRef.current?.resetView()
-                : undefined
-            }
+            key={mode}
+            onClick={() => setLightingMode(mode)}
           >
-            {control}
+            {mode === 'studio' ? 'Studio' : mode === 'day' ? 'Day' : 'Night'}
           </button>
         ))}
+        <button
+          type="button"
+          aria-pressed={inspectionSweep}
+          className="toolbar-button"
+          onClick={() => setInspectionSweep((enabled) => !enabled)}
+        >
+          {inspectionSweep ? 'Stop Light Sweep' : 'Light Sweep'}
+        </button>
+        {viewerControls.map((control) => (
+  <button
+    type="button"
+    className="toolbar-button"
+    key={control.action}
+    onClick={() => {
+      const viewer = vehicleViewerRef.current
+
+      if (!viewer) {
+        return
+      }
+
+      switch (control.action) {
+        case 'reset':
+          viewer.resetView()
+          break
+
+        case 'fullscreen':
+          viewer.toggleFullscreen()
+          break
+
+        case 'frontLeft':
+        case 'frontRight':
+        case 'left':
+        case 'right':
+        case 'top':
+          viewer.setNamedView(control.action)
+          break
+      }
+    }}
+  >
+    {control.label}
+  </button>
+))}
       </footer>
     </main>
   )
